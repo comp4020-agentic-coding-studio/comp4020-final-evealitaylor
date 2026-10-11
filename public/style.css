@@ -1,0 +1,114 @@
+:root {
+  color-scheme: light dark;
+  --available: #1b7f3a;
+  --pending: #b8860b;
+  --occupied: #b03030;
+  --mismatch: #8a2be2;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 0 1rem 2rem;
+  max-width: 1000px;
+  margin-inline: auto;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 1rem 0;
+}
+
+.whoami input {
+  padding: 0.3rem 0.5rem;
+}
+
+.blurb {
+  opacity: 0.8;
+  max-width: 60ch;
+}
+
+.zone h2 {
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+.desk {
+  border: 2px solid var(--available);
+  border-radius: 0.5rem;
+  padding: 0.6rem;
+}
+
+.desk--pending {
+  border-color: var(--pending);
+}
+
+.desk--occupied {
+  border-color: var(--occupied);
+}
+
+.desk--mismatch {
+  outline: 3px dashed var(--mismatch);
+}
+
+.desk h3 {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+}
+
+.desk-status {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  font-weight: bold;
+  margin: 0 0 0.3rem;
+}
+
+.desk-claim,
+.desk-report {
+  font-size: 0.8rem;
+  margin: 0 0 0.3rem;
+}
+
+.desk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.desk-actions button {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.4rem;
+}
+
+dialog {
+  text-align: center;
+}
+
+dialog img {
+  width: 180px;
+  height: 180px;
+}
+
+footer {
+  margin-top: 2rem;
+  opacity: 0.7;
+}
+
+.readme {
+  max-width: 70ch;
+  margin: 2rem auto;
+  padding: 0 1rem;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+}

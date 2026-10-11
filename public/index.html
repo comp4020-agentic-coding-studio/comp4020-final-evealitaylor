@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hancock Desks — Level 2</title>
+<link rel="stylesheet" href="/public/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Hancock Level 2 — Desks</h1>
+  <div class="whoami">
+    <label for="name">You're</label>
+    <input id="name" type="text" placeholder="a name or pseudonym" maxlength="40" />
+  </div>
+</header>
+
+<p class="blurb">
+  Claiming a desk means you're at it right now — confirm with the check-in
+  link/QR within 20 seconds or it's released back automatically. Anyone can
+  report a desk as actually free or actually taken, independent of what's
+  claimed, since a booking isn't always reality.
+</p>
+
+<main id="board" aria-live="polite"></main>
+
+<dialog id="checkin-dialog">
+  <p>Claimed. Confirm you're at the desk:</p>
+  <img id="checkin-qr" alt="check-in QR code" />
+  <p><a id="checkin-link" target="_blank" rel="noopener">or tap here to check in</a></p>
+  <button id="checkin-close" type="button">close</button>
+</dialog>
+
+<footer><a href="/readme/">readme</a></footer>
+
+<script src="/public/app.js" type="module"></script>
+</body>
+</html>
