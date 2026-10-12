@@ -116,6 +116,10 @@ const server = createServer(async (req, res) => {
     return serveStatic(res, "index.html");
   }
 
+  if (method === "GET" && /^\/checkin\/\d+$/.test(pathname)) {
+    return serveStatic(res, "checkin.html");
+  }
+
   if (method === "GET" && pathname.startsWith("/public/")) {
     return serveStatic(res, pathname.slice("/public/".length));
   }
@@ -155,7 +159,7 @@ const server = createServer(async (req, res) => {
     const rawName = typeof body.name === "string" ? body.name.trim() : "";
     const name = rawName ? rawName.slice(0, 40) : "Anonymous";
     const claim = insertClaim(deskId, name, now, now + CHECKIN_GRACE_MS);
-    const checkinUrl = `${url.origin}/api/claims/${claim.id}/checkin`;
+    const checkinUrl = `${url.origin}/checkin/${claim.id}`;
     const qr = await toDataURL(checkinUrl);
     broadcast();
     return sendJson(res, 201, {

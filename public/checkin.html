@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Check in — Seat Seeker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/public/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Seat Seeker"><span class="wordmark">Seat Seeker</span></a>
+</header>
+<main class="checkin-page">
+  <span id="status-pill" class="pill pill--yellow">Checking in…</span>
+  <h1 id="title">Confirming you're at the desk</h1>
+  <p id="detail" class="sub"></p>
+  <p><a class="btn" href="/">Back to the floor plan</a></p>
+</main>
+<script type="module">
+  const pill = document.getElementById("status-pill");
+  const title = document.getElementById("title");
+  const detail = document.getElementById("detail");
+  const claimId = location.pathname.split("/").filter(Boolean).pop();
+
+  // The check-in is a POST sent from here rather than done on page load server-side,
+  // so link previewers that fetch the URL without running scripts can't check anyone in.
+  const res = await fetch(`/api/claims/${encodeURIComponent(claimId)}/checkin`, { method: "POST" });
+  const body = await res.json().catch(() => ({}));
+  if (res.ok) {
+    pill.className = "pill pill--green";
+    pill.textContent = "Checked in";
+    title.textContent = "You're checked in";
+    detail.textContent = "The desk is held for you for up to 2 hours. Tap \"I'm leaving\" on the map when you go.";
+  } else {
+    pill.className = "pill pill--red";
+    pill.textContent = "Not checked in";
+    title.textContent = "Couldn't check in";
+    detail.textContent =
+      res.status === 409
+        ? "This claim has already been checked in, released, or ran past its 20-second window. Claim the desk again if it's still free."
+        : (body.error ?? "Something went wrong. Try claiming the desk again.");
+  }
+</script>
+</body>
+</html>

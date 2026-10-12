@@ -55,6 +55,28 @@ it("lets one claim through and refuses an overlapping one", async () => {
   expect(desk.claim.name).toBe("alice");
 });
 
+it("serves the QR check-in link as a page, without checking in on a bare GET", async () => {
+  const deskId = "2.25-1";
+
+  const res = await fetch(new URL(`/api/desks/${deskId}/claim`, baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "dana" }),
+  });
+  expect(res.status).toBe(201);
+  const claim = await res.json();
+
+  // Scanning the QR is a GET from a phone browser, so the link must answer one.
+  const page = await fetch(claim.checkinUrl);
+  expect(page.status).toBe(200);
+  expect(page.headers.get("content-type")).toContain("text/html");
+
+  // A link previewer fetching the URL must not confirm the claim on its own.
+  const desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
+  const desk = desks.find((d: { id: string }) => d.id === deskId);
+  expect(desk.status).toBe("pending");
+});
+
 it("records a crowdsourced report without overwriting claim status", async () => {
   const deskId = "2.24-1";
 

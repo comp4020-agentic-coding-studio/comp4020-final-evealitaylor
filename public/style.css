@@ -487,6 +487,25 @@ body {
   margin: 10px 0 0;
 }
 
+.checkin-page {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.checkin-page h1 {
+  font-weight: 400;
+  font-size: 26px;
+  margin: 18px 0 8px;
+}
+
+.checkin-page .btn {
+  display: inline-block;
+  margin-top: 18px;
+  text-decoration: none;
+}
+
 .readme {
   max-width: 70ch;
   margin: 2rem auto;
