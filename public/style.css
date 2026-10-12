@@ -134,43 +134,65 @@ body {
   height: auto;
 }
 
-.building {
-  fill: #fafcfd;
-  stroke: #b9cad7;
-  stroke-width: 3;
+.wing {
+  stroke: #9fb3c2;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.wing--west { fill: #eef2f5; }
+.wing--east { fill: #fbf2d6; }
+
+.wing-label {
+  fill: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .room {
-  fill: var(--room);
-  stroke: var(--line);
-  stroke-width: 2;
+  fill: #fafcfd;
+  stroke: #b9cad7;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
 }
 
 .core {
   fill: #d6e1ea;
 }
 
+.void {
+  fill: #ffffff;
+  stroke: #9fb3c2;
+  stroke-width: 1.2;
+}
+
 .core-label {
   fill: var(--muted);
-  font-size: 15px;
+  font-size: 6.5px;
   text-anchor: middle;
+}
+
+.core-label.open {
+  font-style: italic;
+  font-size: 7px;
+}
+
+.core-label.end {
+  text-anchor: end;
 }
 
 .room-title {
   fill: var(--ink);
   font-family: "Fredoka", system-ui, sans-serif;
   font-weight: 600;
-  font-size: 19px;
-}
-
-.room-sub {
-  fill: var(--muted);
-  font-size: 12.5px;
+  font-size: 10px;
 }
 
 .room-free {
   fill: var(--slate);
-  font-size: 12.5px;
+  font-size: 7px;
   font-weight: 700;
 }
 
@@ -189,7 +211,7 @@ body {
 
 .seat-body {
   stroke: transparent;
-  stroke-width: 4;
+  stroke-width: 2;
   transition: fill 0.25s;
 }
 
@@ -208,7 +230,7 @@ body {
 
 .seat-num {
   fill: #fff;
-  font-size: 14px;
+  font-size: 8.5px;
   font-weight: 700;
   text-anchor: middle;
   pointer-events: none;
@@ -225,8 +247,8 @@ body {
 
 .seat--mismatch .seat-ring {
   stroke: var(--violet);
-  stroke-width: 3;
-  stroke-dasharray: 5 4;
+  stroke-width: 1.5;
+  stroke-dasharray: 2.5 2;
 }
 
 .seat-badge {
@@ -239,7 +261,7 @@ body {
   display: inline;
 }
 
-.badge-bg { fill: #fff; stroke: var(--navy); stroke-width: 1.5; }
+.badge-bg { fill: #fff; stroke: var(--navy); stroke-width: 0.8; }
 .seat--reported-free .badge-dot { fill: var(--green); }
 .seat--reported-taken .badge-dot { fill: var(--red); }
 
@@ -278,6 +300,10 @@ body {
 }
 .key--mismatch {
   border: 2.5px dashed var(--violet);
+}
+
+.fine a {
+  color: inherit;
 }
 
 .fine {
