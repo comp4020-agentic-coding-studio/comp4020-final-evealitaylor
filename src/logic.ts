@@ -103,3 +103,62 @@ export function latestReportForDesk(
     .sort((a, b) => b.createdAt - a.createdAt);
   return live[0] ?? null;
 }
+
+// ---- Ghost claims: the product's core insight, counted ----
+//
+// A ghost claim is a "looks free" report made while that desk was claimed
+// (pending) or checked in: the booking says taken, someone there says
+// otherwise. Counted from the activity log alone, by replaying each desk's
+// events in order, so it needs no extra state and covers all history.
+
+export interface GhostTally {
+  // "Looks free" reports that landed on a live claim.
+  ghosts: number;
+  // Every report in the window, for context ("4 of 11 reports").
+  reports: number;
+  // Claims made in the window.
+  claims: number;
+  byZone: Record<string, number>;
+}
+
+export function tallyGhosts(
+  events: ActivityEvent[],
+  zoneOf: (deskId: string) => string,
+  since: number,
+): GhostTally {
+  const tally: GhostTally = { ghosts: 0, reports: 0, claims: 0, byZone: {} };
+  // Desk id -> whether a claim is currently open on it, replaying in order.
+  const open = new Map<string, boolean>();
+  const ordered = [...events].sort((a, b) => a.id - b.id);
+  for (const e of ordered) {
+    if (e.kind === "claim") open.set(e.deskId, true);
+    else if (e.kind === "release" || e.kind === "expire") open.set(e.deskId, false);
+    if (e.at < since) continue;
+    if (e.kind === "claim") tally.claims++;
+    if (e.kind !== "report") continue;
+    tally.reports++;
+    if (e.detail === "free" && open.get(e.deskId)) {
+      tally.ghosts++;
+      const zone = zoneOf(e.deskId);
+      tally.byZone[zone] = (tally.byZone[zone] ?? 0) + 1;
+    }
+  }
+  return tally;
+}
+
+// Midnight in Canberra (where the library is), as a UTC timestamp, for "today".
+export function startOfLibraryDay(now: number, timeZone = "Australia/Sydney"): number {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(now));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)!.value);
+  const sinceMidnight = ((get("hour") * 60 + get("minute")) * 60 + get("second")) * 1000 + (now % 1000);
+  return now - sinceMidnight;
+}

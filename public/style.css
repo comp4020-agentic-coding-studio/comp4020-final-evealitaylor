@@ -122,6 +122,57 @@ body {
 .pill--red { background: var(--red); }
 .pill--orange { background: var(--orange); }
 
+.pulse {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 4px 20px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+
+.pulse-stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.pulse-num {
+  font-family: "Fredoka", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+
+.pulse-stat--ghost .pulse-num {
+  color: var(--violet);
+}
+
+.pulse-label {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.pulse-detail {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+@media (max-width: 520px) {
+  .pulse {
+    grid-template-columns: auto auto;
+  }
+
+  .pulse-detail {
+    grid-column: 1 / -1;
+  }
+}
+
 .map-card {
   background: var(--map-bg);
   border-radius: 14px;

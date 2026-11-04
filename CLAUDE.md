@@ -94,7 +94,29 @@ silently replace or hide the claim-derived status — a mismatch between
 (bookings don't always match reality), not a bug to resolve by picking one
 side. The UI must surface both signals, not just one.
 
+## Ghost claims: the mismatch, counted
+
+- A **ghost claim** is a "looks free" report made while that desk had a
+  live (pending or checked-in) claim. It is the product's core insight made
+  visible, so it is shown prominently ("N ghost claims today", per zone),
+  never hidden or softened. Counting it never changes any claim: it's a
+  tally over the activity log, not an action.
+- The rule lives in `tallyGhosts` (`src/logic.ts`, tested with injected
+  events in `spec/logic.test.ts`). The server keeps today's tally in memory
+  and updates it per recorded event (`countGhost`), seeded by one replay at
+  startup and at Canberra midnight (`startOfLibraryDay`, Australia/Sydney).
+  Any change to the rule must change both and keep `spec/ghosts.test.ts`
+  (the HTTP check that they agree) green. Never recompute from the whole
+  log per broadcast.
+- "Here now" is the number of open live connections, pushed to everyone on
+  connect and disconnect. It's a count only: no names, no per-viewer data.
+
 ## Real-time and persistence
+
+- Broadcasts are coalesced into one snapshot per 100ms (`BROADCAST_MS`), so
+  a room connecting or claiming at once costs one send per window, not one
+  per event per client. Keep it well under the 1s budget; don't remove the
+  coalescing to make updates "faster".
 
 - State changes (claim, check-in, release, report, auto-release) must reach
   every open session within about 1 second. The server-side sweep that

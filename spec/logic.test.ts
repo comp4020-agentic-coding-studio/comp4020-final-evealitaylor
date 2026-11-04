@@ -8,6 +8,9 @@ import {
   isClaimExpired,
   isReportStale,
   latestReportForDesk,
+  startOfLibraryDay,
+  tallyGhosts,
+  type ActivityEvent,
   type Claim,
   type OccupancyReport,
 } from "../src/logic.ts";
@@ -119,5 +122,66 @@ describe("latestReportForDesk", () => {
   it("ignores stale reports", () => {
     const reports = [report({ createdAt: 0 })];
     expect(latestReportForDesk(reports, "desk-1", REPORT_STALE_MS + 1)).toBeNull();
+  });
+});
+
+describe("tallyGhosts", () => {
+  let id = 0;
+  const ev = (kind: ActivityEvent["kind"], deskId: string, at: number, detail: string | null = null): ActivityEvent => ({
+    id: ++id,
+    at,
+    kind,
+    deskId,
+    claimId: kind === "report" ? null : 1,
+    actor: "x",
+    detail,
+  });
+  const zoneOf = (d: string) => d.split("-")[0]!;
+
+  it("counts a 'looks free' report on a claimed or checked-in desk as a ghost", () => {
+    const events = [
+      ev("claim", "a-1", 10),
+      ev("report", "a-1", 20, "free"), // pending claim: ghost
+      ev("checkin", "a-1", 30),
+      ev("report", "a-1", 40, "free"), // checked in: ghost
+      ev("report", "a-1", 50, "taken"), // agrees with claim: not a ghost
+    ];
+    expect(tallyGhosts(events, zoneOf, 0)).toEqual({ ghosts: 2, reports: 3, claims: 1, byZone: { a: 2 } });
+  });
+
+  it("doesn't count reports on unclaimed desks, or after release/expiry", () => {
+    const events = [
+      ev("report", "a-1", 5, "free"), // never claimed
+      ev("claim", "a-1", 10),
+      ev("release", "a-1", 20),
+      ev("report", "a-1", 30, "free"), // released: agrees
+      ev("claim", "b-1", 40),
+      ev("expire", "b-1", 50, "unconfirmed"),
+      ev("report", "b-1", 60, "free"), // expired: agrees
+    ];
+    expect(tallyGhosts(events, zoneOf, 0).ghosts).toBe(0);
+  });
+
+  it("counts only reports in the window, but uses earlier claims to know a desk was held", () => {
+    const events = [
+      ev("claim", "a-1", 10), // before the window, still open
+      ev("report", "a-1", 15, "free"), // before the window: not counted
+      ev("report", "a-1", 120, "free"), // in the window, desk held: ghost
+    ];
+    expect(tallyGhosts(events, zoneOf, 100)).toEqual({ ghosts: 1, reports: 1, claims: 0, byZone: { a: 1 } });
+  });
+
+  it("replays in log order regardless of the order it's given", () => {
+    const events = [ev("claim", "a-1", 10), ev("report", "a-1", 20, "free")].reverse();
+    expect(tallyGhosts(events, zoneOf, 0).ghosts).toBe(1);
+  });
+});
+
+describe("startOfLibraryDay", () => {
+  it("is Canberra midnight, across daylight saving", () => {
+    // 2026-11-04 17:30 AEDT (UTC+11) -> 2026-11-04 00:00 AEDT = 2026-11-03 13:00 UTC
+    expect(startOfLibraryDay(Date.UTC(2026, 10, 4, 6, 30))).toBe(Date.UTC(2026, 10, 3, 13, 0));
+    // 2026-06-15 09:00 AEST (UTC+10) -> 2026-06-15 00:00 AEST = 2026-06-14 14:00 UTC
+    expect(startOfLibraryDay(Date.UTC(2026, 5, 14, 23, 0))).toBe(Date.UTC(2026, 5, 14, 14, 0));
   });
 });

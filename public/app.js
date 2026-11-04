@@ -64,6 +64,9 @@ const freeCount = document.getElementById("free-count");
 const levelPill = document.getElementById("level-pill");
 const activityList = document.getElementById("activity-list");
 const conn = document.getElementById("conn");
+const ghostCount = document.getElementById("ghost-count");
+const hereCount = document.getElementById("here-count");
+const ghostDetail = document.getElementById("ghost-detail");
 
 const seatEls = new Map();
 const areaFree = [];
@@ -484,9 +487,25 @@ function setConn(state) {
   conn.textContent = { live: "Live", connecting: "Connecting…", offline: "Reconnecting…" }[state];
 }
 
+function renderStats(stats) {
+  if (!stats) return;
+  const { ghosts, reports, byZone } = stats.today;
+  ghostCount.textContent = String(ghosts);
+  hereCount.textContent = String(stats.here);
+  hereCount.setAttribute("aria-label", `${stats.here} ${stats.here === 1 ? "person" : "people"} viewing Level 2 now`);
+  const worst = Object.entries(byZone).sort((a, b) => b[1] - a[1])[0];
+  ghostDetail.textContent =
+    ghosts === 0
+      ? reports === 0
+        ? "A ghost claim is a desk someone reported free while it was booked. None reported yet today."
+        : `No ghost claims yet today, from ${reports} ${reports === 1 ? "report" : "reports"}. So far, bookings match what people see.`
+      : `${ghosts} of ${reports} reports today found a booked desk free.${worst ? ` Most in ${worst[0]} (${worst[1]}).` : ""}`;
+}
+
 function apply(payload) {
   const snapshot = payload.desks;
   activity = payload.activity;
+  renderStats(payload.stats);
   desks = snapshot;
   desksById = new Map(desks.map((d) => [d.id, d]));
   if (!built) buildMap();

@@ -113,6 +113,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS reports_recent ON occupancy_reports (created_at);
   CREATE INDEX IF NOT EXISTS claims_by_user ON claims (user_id);
   CREATE INDEX IF NOT EXISTS activity_by_user ON activity (user_id);
+  CREATE INDEX IF NOT EXISTS activity_by_time ON activity (at);
   CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions (user_id);
 `);
 
@@ -304,6 +305,24 @@ export function getActivity(limit: number): ActivityEvent[] {
        ORDER BY a.id DESC LIMIT ?`,
     )
     .all(limit) as unknown as ActivityRow[];
+  return rows.map(activityFromRow);
+}
+
+// Every event at or after `since`, oldest first, plus the last claim/release/
+// expire before `since` for each desk (so a replay knows which desks were
+// already held). Used once at startup to seed today's ghost tally.
+export function getActivitySince(since: number): ActivityEvent[] {
+  const rows = db
+    .prepare(
+      `SELECT a.*, u.handle FROM activity a LEFT JOIN users u ON u.id = a.user_id
+       WHERE a.at >= ?
+          OR a.id IN (
+            SELECT MAX(id) FROM activity
+            WHERE at < ? AND kind IN ('claim', 'release', 'expire') GROUP BY desk_id
+          )
+       ORDER BY a.id`,
+    )
+    .all(since, since) as unknown as ActivityRow[];
   return rows.map(activityFromRow);
 }
 

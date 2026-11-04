@@ -26,6 +26,7 @@ import {
   deleteUser,
   deleteExpiredSessions,
   getActivityForUser,
+  getActivitySince,
 } from "./db.ts";
 import type { User } from "./db.ts";
 import {
@@ -47,8 +48,10 @@ import {
   CHECKIN_GRACE_MS,
   CLAIM_HOLD_MS,
   REPORT_STALE_MS,
+  startOfLibraryDay,
+  tallyGhosts,
 } from "./logic.ts";
-import type { ActivityEvent } from "./logic.ts";
+import type { ActivityEvent, GhostTally } from "./logic.ts";
 import { renderReadmeHtml } from "./readme.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -58,6 +61,54 @@ const sseClients = new Set<ServerResponse>();
 // Desks are seeded once and never change at runtime.
 const DESKS = getDesks();
 const DESK_IDS = new Set(DESKS.map((d) => d.id));
+const ZONE_OF = new Map(DESKS.map((d) => [d.id, d.zone]));
+const zoneOf = (deskId: string) => ZONE_OF.get(deskId) ?? "Unknown";
+
+// Today's ghost tally, kept in memory and updated per event rather than
+// recomputed from the log on every broadcast (that would scale with
+// history; see "Cost stays flat" in CLAUDE.md). Seeded by one replay at
+// startup and at each Canberra midnight.
+let ghostDay = 0;
+let ghostTally: GhostTally = { ghosts: 0, reports: 0, claims: 0, byZone: {} };
+const deskHeld = new Map<string, boolean>();
+
+function reseedGhosts(now: number): void {
+  ghostDay = startOfLibraryDay(now);
+  const events = getActivitySince(ghostDay);
+  ghostTally = tallyGhosts(events, zoneOf, ghostDay);
+  deskHeld.clear();
+  for (const e of events) {
+    if (e.kind === "claim") deskHeld.set(e.deskId, true);
+    else if (e.kind === "release" || e.kind === "expire") deskHeld.set(e.deskId, false);
+  }
+}
+
+// Mirrors tallyGhosts for one new event (spec/logic.test.ts pins the rules;
+// spec/ghosts.test.ts checks this incremental path agrees over HTTP).
+function countGhost(e: Omit<ActivityEvent, "id">): void {
+  if (startOfLibraryDay(e.at) !== ghostDay) reseedGhosts(e.at);
+  if (e.kind === "claim") {
+    deskHeld.set(e.deskId, true);
+    ghostTally.claims++;
+  } else if (e.kind === "release" || e.kind === "expire") {
+    deskHeld.set(e.deskId, false);
+  } else if (e.kind === "report") {
+    ghostTally.reports++;
+    if (e.detail === "free" && deskHeld.get(e.deskId)) {
+      ghostTally.ghosts++;
+      const zone = zoneOf(e.deskId);
+      ghostTally.byZone[zone] = (ghostTally.byZone[zone] ?? 0) + 1;
+    }
+  }
+}
+
+reseedGhosts(Date.now());
+
+function stats() {
+  if (startOfLibraryDay(Date.now()) !== ghostDay) reseedGhosts(Date.now());
+  // People with the page open right now: the room, made visible to itself.
+  return { here: sseClients.size, today: ghostTally };
+}
 // How much history the page shows; the table itself keeps everything.
 const ACTIVITY_LIMIT = 50;
 
@@ -85,13 +136,24 @@ function snapshot() {
 }
 
 function livePayload(): string {
-  return `data: ${JSON.stringify({ desks: snapshot(), activity: getActivity(ACTIVITY_LIMIT) })}\n\n`;
+  return `data: ${JSON.stringify({ desks: snapshot(), activity: getActivity(ACTIVITY_LIMIT), stats: stats() })}\n\n`;
 }
 
+// Coalesces bursts (a room of people connecting at once, a flurry of
+// claims) into one snapshot per BROADCAST_MS, so cost is per update window,
+// not per event times per client. 100ms keeps well inside the 1s budget.
+const BROADCAST_MS = 100;
+let broadcastQueued = false;
+
 function broadcast(): void {
-  if (sseClients.size === 0) return;
-  const payload = livePayload();
-  for (const client of sseClients) client.write(payload);
+  if (broadcastQueued) return;
+  broadcastQueued = true;
+  setTimeout(() => {
+    broadcastQueued = false;
+    if (sseClients.size === 0) return;
+    const payload = livePayload();
+    for (const client of sseClients) client.write(payload);
+  }, BROADCAST_MS);
 }
 
 // Every state change is recorded in the activity table (what the page and
@@ -101,6 +163,7 @@ function broadcast(): void {
 // student IDs, passphrases or any token.
 function record(event: Omit<ActivityEvent, "id">, userId: number | null = null): void {
   const saved = insertActivity(event, userId);
+  countGhost(event);
   console.log(JSON.stringify({ ...saved, userId, at: new Date(saved.at).toISOString() }));
 }
 
@@ -237,6 +300,10 @@ const server = createServer(async (req, res) => {
     return sendJson(res, 200, snapshot());
   }
 
+  if (method === "GET" && pathname === "/api/stats") {
+    return sendJson(res, 200, stats());
+  }
+
   if (method === "GET" && pathname === "/api/activity") {
     const asked = Number(url.searchParams.get("limit"));
     const limit = Number.isInteger(asked) && asked > 0 ? Math.min(asked, 200) : ACTIVITY_LIMIT;
@@ -249,9 +316,13 @@ const server = createServer(async (req, res) => {
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
-    res.write(livePayload());
     sseClients.add(res);
-    req.on("close", () => sseClients.delete(res));
+    // Everyone (including the newcomer) sees the "here now" count change.
+    broadcast();
+    req.on("close", () => {
+      sseClients.delete(res);
+      broadcast();
+    });
     return;
   }
 
