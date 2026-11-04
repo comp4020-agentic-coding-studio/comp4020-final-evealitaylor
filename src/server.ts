@@ -7,9 +7,9 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { toDataURL } from "qrcode";
 import {
   getDesks,
-  getClaims,
+  getLiveClaims,
   getClaim,
-  getReports,
+  getReportsSince,
   getActivity,
   insertActivity,
   getClaimToken,
@@ -26,6 +26,7 @@ import {
   latestReportForDesk,
   CHECKIN_GRACE_MS,
   CLAIM_HOLD_MS,
+  REPORT_STALE_MS,
 } from "./logic.ts";
 import type { ActivityEvent } from "./logic.ts";
 import { renderReadmeHtml } from "./readme.ts";
@@ -34,14 +35,17 @@ const PORT = Number(process.env.PORT ?? 8080);
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("../public/", import.meta.url)));
 
 const sseClients = new Set<ServerResponse>();
+// Desks are seeded once and never change at runtime.
+const DESKS = getDesks();
+const DESK_IDS = new Set(DESKS.map((d) => d.id));
 // How much history the page shows; the table itself keeps everything.
 const ACTIVITY_LIMIT = 50;
 
 function snapshot() {
   const now = Date.now();
-  const claims = getClaims();
-  const reports = getReports();
-  return getDesks().map((desk) => {
+  const claims = getLiveClaims();
+  const reports = getReportsSince(now - REPORT_STALE_MS);
+  return DESKS.map((desk) => {
     const claim = activeClaimForDesk(claims, desk.id, now);
     const report = latestReportForDesk(reports, desk.id, now);
     return {
@@ -92,7 +96,7 @@ setInterval(() => {
 // discovered the next time someone happens to fetch desk state.
 setInterval(() => {
   const now = Date.now();
-  const expired = getClaims().filter((c) => isClaimExpired(c, now));
+  const expired = getLiveClaims().filter((c) => isClaimExpired(c, now));
   if (expired.length === 0) return;
   for (const claim of expired) {
     markExpired(claim.id);
@@ -198,8 +202,7 @@ const server = createServer(async (req, res) => {
   const claimMatch = /^\/api\/desks\/([^/]+)\/claim$/.exec(pathname);
   if (method === "POST" && claimMatch) {
     const deskId = decodeURIComponent(claimMatch[1]!);
-    const desk = getDesks().find((d) => d.id === deskId);
-    if (!desk) return sendJson(res, 404, { error: "no such desk" });
+    if (!DESK_IDS.has(deskId)) return sendJson(res, 404, { error: "no such desk" });
     // Read the body before checking the desk is free: an await between the
     // check and the insert would let two concurrent claims both pass it.
     const body = await readJsonBody(req);
@@ -266,8 +269,7 @@ const server = createServer(async (req, res) => {
   const reportMatch = /^\/api\/desks\/([^/]+)\/report$/.exec(pathname);
   if (method === "POST" && reportMatch) {
     const deskId = decodeURIComponent(reportMatch[1]!);
-    const desk = getDesks().find((d) => d.id === deskId);
-    if (!desk) return sendJson(res, 404, { error: "no such desk" });
+    if (!DESK_IDS.has(deskId)) return sendJson(res, 404, { error: "no such desk" });
     const body = await readJsonBody(req);
     const status = body.status === "free" || body.status === "taken" ? body.status : null;
     if (!status) return sendJson(res, 400, { error: "status must be 'free' or 'taken'" });

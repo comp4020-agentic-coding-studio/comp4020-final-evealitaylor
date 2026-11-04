@@ -99,6 +99,15 @@ side. The UI must surface both signals, not just one.
   auto-releases expired claims runs on a 1s interval for exactly this reason
   — don't replace it with lazy-on-read-only logic, or auto-release stops
   being something other sessions see happen live.
+- **Cost stays flat as history grows.** History is kept forever, so no
+  per-request or per-second path may read whole tables: snapshots and the
+  sweep read only live claims (`getLiveClaims`) and non-stale reports
+  (`getReportsSince`), both indexed. `pnpm bench:history` runs the app on
+  50k claims/reports and 100k log rows and must stay under 50ms per
+  `/api/desks` and 200MB RSS (the machine has 256MB). Run it after any change
+  to `db.ts` queries or the snapshot. (Correction: snapshots originally
+  re-read every claim ever made: 450ms and ~390MB at that size, i.e. the
+  production machine would have run out of memory as the app was used.)
 - All persistent state lives in the single SQLite file on the `/data`
   volume (`src/db.ts`). No second datastore, no separate DB server — the
   infra is fixed to one `shared-cpu-1x` machine and one volume.

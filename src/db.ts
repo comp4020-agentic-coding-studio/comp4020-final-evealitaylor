@@ -73,6 +73,13 @@ db.exec(`
     ON claims (desk_id) WHERE status IN ('pending', 'active');
 `);
 
+// Reads only ever ask for live claims and recent reports, never the whole
+// history, so these keep snapshot and sweep cost flat as history grows.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS claims_live ON claims (status) WHERE status IN ('pending', 'active');
+  CREATE INDEX IF NOT EXISTS reports_recent ON occupancy_reports (created_at);
+`);
+
 const deskCount = db.prepare("SELECT COUNT(*) AS n FROM desks").get() as { n: number };
 if (deskCount.n === 0) {
   const insert = db.prepare("INSERT INTO desks (id, zone, label) VALUES (?, ?, ?)");
@@ -125,8 +132,13 @@ export function getDesks(): Desk[] {
   return rows;
 }
 
-export function getClaims(): Claim[] {
-  const rows = db.prepare("SELECT * FROM claims").all() as unknown as ClaimRow[];
+// Only pending/active claims: everything the snapshot and sweep need. The
+// full history stays in the table (and the activity log) but is never
+// scanned per request; that's what kept this app from scaling (see CLAUDE.md).
+export function getLiveClaims(): Claim[] {
+  const rows = db
+    .prepare("SELECT * FROM claims WHERE status IN ('pending', 'active')")
+    .all() as unknown as ClaimRow[];
   return rows.map(claimFromRow);
 }
 
@@ -135,8 +147,11 @@ export function getClaim(id: number): Claim | null {
   return row ? claimFromRow(row) : null;
 }
 
-export function getReports(): OccupancyReport[] {
-  const rows = db.prepare("SELECT * FROM occupancy_reports").all() as unknown as ReportRow[];
+// Reports created at or after `since`; older ones are stale and never shown.
+export function getReportsSince(since: number): OccupancyReport[] {
+  const rows = db
+    .prepare("SELECT * FROM occupancy_reports WHERE created_at >= ?")
+    .all(since) as unknown as ReportRow[];
   return rows.map(reportFromRow);
 }
 

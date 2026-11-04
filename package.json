@@ -9,7 +9,8 @@
     "check:evidence": "node scripts/check-evidence.ts",
     "test": "vitest run",
     "start": "node src/server.ts",
-    "browser-check": "node scripts/browser-check.mjs"
+    "browser-check": "node scripts/browser-check.mjs",
+    "bench:history": "bash scripts/history-bench.sh"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
