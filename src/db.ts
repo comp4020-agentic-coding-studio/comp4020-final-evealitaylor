@@ -2,7 +2,15 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { SEED_DESKS } from "./seed.ts";
-import type { Claim, ClaimStatus, Desk, OccupancyReport, ReportStatus } from "./logic.ts";
+import type {
+  ActivityEvent,
+  ActivityKind,
+  Claim,
+  ClaimStatus,
+  Desk,
+  OccupancyReport,
+  ReportStatus,
+} from "./logic.ts";
 
 // Fly's one volume is mounted at /data; override for local dev with
 // DB_PATH=./some/local/file.db since /data won't exist outside the container.
@@ -26,6 +34,17 @@ db.exec(`
     expires_at INTEGER NOT NULL,
     status TEXT NOT NULL
   );
+  -- Append-only history of who did what: never updated or deleted, so it's
+  -- what persists across days after every claim has long since expired.
+  CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    desk_id TEXT NOT NULL,
+    claim_id INTEGER,
+    actor TEXT NOT NULL,
+    detail TEXT
+  );
   CREATE TABLE IF NOT EXISTS occupancy_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     desk_id TEXT NOT NULL,
@@ -34,8 +53,8 @@ db.exec(`
   );
 `);
 
-// Release token: a secret handed only to whoever made the claim, so nobody
-// else can free their desk. Added after launch, so older rows have none.
+// Claim token: a secret handed only to whoever made the claim, so nobody
+// else can check in to or free their desk. Added after launch, so older rows have none.
 const claimColumns = db.prepare("PRAGMA table_info(claims)").all() as { name: string }[];
 if (!claimColumns.some((c) => c.name === "token")) {
   db.exec("ALTER TABLE claims ADD COLUMN token TEXT");
@@ -180,4 +199,37 @@ export function insertReport(deskId: string, status: ReportStatus, createdAt: nu
     status,
     createdAt,
   );
+}
+
+interface ActivityRow {
+  id: number;
+  at: number;
+  kind: ActivityKind;
+  desk_id: string;
+  claim_id: number | null;
+  actor: string;
+  detail: string | null;
+}
+
+export function insertActivity(event: Omit<ActivityEvent, "id">): ActivityEvent {
+  const result = db
+    .prepare("INSERT INTO activity (at, kind, desk_id, claim_id, actor, detail) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(event.at, event.kind, event.deskId, event.claimId, event.actor, event.detail);
+  return { id: Number(result.lastInsertRowid), ...event };
+}
+
+// Newest first.
+export function getActivity(limit: number): ActivityEvent[] {
+  const rows = db
+    .prepare("SELECT * FROM activity ORDER BY id DESC LIMIT ?")
+    .all(limit) as unknown as ActivityRow[];
+  return rows.map((row) => ({
+    id: row.id,
+    at: row.at,
+    kind: row.kind,
+    deskId: row.desk_id,
+    claimId: row.claim_id,
+    actor: row.actor,
+    detail: row.detail,
+  }));
 }

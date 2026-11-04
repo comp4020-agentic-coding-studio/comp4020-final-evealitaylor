@@ -62,18 +62,20 @@ const sheet = document.getElementById("sheet");
 const sheetBody = document.getElementById("sheet-body");
 const freeCount = document.getElementById("free-count");
 const levelPill = document.getElementById("level-pill");
+const activityList = document.getElementById("activity-list");
+const conn = document.getElementById("conn");
 
 const seatEls = new Map();
 const areaFree = [];
 const qrByClaim = new Map();
 
-// Release tokens for claims made from this browser (or checked in from it via
-// the QR link). Only the holder can release a claim, so only they see the button.
-function releaseToken(claimId) {
-  try { return localStorage.getItem(`releaseToken:${claimId}`); } catch { return null; }
+// Claim tokens for claims made from this browser (or opened on it via the QR
+// link). Only the holder can check in or release, so only they see those buttons.
+function claimToken(claimId) {
+  try { return localStorage.getItem(`claimToken:${claimId}`); } catch { return null; }
 }
-function saveReleaseToken(claimId, token) {
-  try { localStorage.setItem(`releaseToken:${claimId}`, token); } catch {}
+function saveClaimToken(claimId, token) {
+  try { localStorage.setItem(`claimToken:${claimId}`, token); } catch {}
 }
 let desks = [];
 let desksById = new Map();
@@ -81,6 +83,10 @@ let selectedId = null;
 let lastSheetSig = null;
 let sheetMsg = "";
 let built = false;
+let activity = [];
+// True while a POST is in flight: buttons are disabled so a slow connection
+// can't turn one tap into two requests.
+let busy = false;
 
 function svg(tag, attrs = {}, parent) {
   const e = document.createElementNS(NS, tag);
@@ -278,8 +284,8 @@ function renderSheet(force = false) {
     return;
   }
   const qr = desk.claim ? qrByClaim.get(desk.claim.id) : null;
-  const mine = desk.claim ? Boolean(releaseToken(desk.claim.id)) : false;
-  const sig = JSON.stringify([desk, Boolean(qr), mine, sheetMsg]);
+  const mine = desk.claim ? Boolean(claimToken(desk.claim.id)) : false;
+  const sig = JSON.stringify([desk, Boolean(qr), mine, sheetMsg, busy]);
   if (!force && sig === lastSheetSig) return;
   lastSheetSig = sig;
 
@@ -298,8 +304,8 @@ function renderSheet(force = false) {
     main = `
       <p>Claimed by <strong>${escapeHtml(desk.claim.name)}</strong>. Check in within
       <strong data-countdown="${desk.claim.expiresAt}">${secondsLeft(desk.claim.expiresAt)}s</strong> or it's released.</p>
-      ${qr ? `<div class="qr"><img src="${qr}" alt="Check-in QR code" /></div>` : ""}
-      <div class="actions"><button class="btn" data-action="checkin">Check in</button></div>`;
+      ${mine && qr ? `<div class="qr"><img src="${qr}" alt="Check-in QR code" /></div>` : ""}
+      ${mine ? `<div class="actions"><button class="btn" data-action="checkin">Check in</button></div>` : ""}`;
   } else {
     main = `
       <p><strong>${escapeHtml(desk.claim.name)}</strong> is here. Held until ${clock(desk.claim.expiresAt)}.</p>
@@ -327,7 +333,7 @@ function renderSheet(force = false) {
     </div>
     ${report}
     ${main}
-    ${sheetMsg ? `<p class="msg">${escapeHtml(sheetMsg)}</p>` : ""}
+    ${sheetMsg ? `<p class="msg" role="alert">${escapeHtml(sheetMsg)}</p>` : ""}
     <hr class="divider" />
     <p class="hint">What do you actually see at this desk?</p>
     <div class="report-row">
@@ -335,6 +341,11 @@ function renderSheet(force = false) {
       <button class="btn btn--ghost" data-action="report-taken">Looks taken</button>
     </div>`;
   sheet.classList.add("open");
+  if (busy) {
+    for (const btn of sheetBody.querySelectorAll("button[data-action]:not([data-action=close])")) {
+      btn.disabled = true;
+    }
+  }
 
   const nameInput = document.getElementById("claim-name");
   if (nameInput) {
@@ -354,25 +365,41 @@ function select(id) {
 }
 
 function deselect() {
+  const seat = selectedId ? seatEls.get(selectedId) : null;
   selectedId = null;
   sheetMsg = "";
   updateMap();
   renderSheet(true);
+  // Keyboard users land back on the desk they opened, not the top of the page.
+  seat?.focus();
 }
 
 async function postJson(path, body) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, data };
+  // Give up after 10s rather than leave the buttons disabled forever.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, data };
+  } catch {
+    return { ok: false, data: { error: "Couldn't reach the server. Check your connection and try again." } };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function act(action) {
   const desk = desksById.get(selectedId);
-  if (!desk) return;
+  if (!desk || busy) return;
+  busy = true;
+  sheetMsg = "";
+  renderSheet(true);
   const deskPath = `/api/desks/${encodeURIComponent(desk.id)}`;
   let result = { ok: true, data: {} };
   if (action === "claim") {
@@ -381,15 +408,16 @@ async function act(action) {
     result = await postJson(`${deskPath}/claim`, { name });
     if (result.ok) {
       qrByClaim.set(result.data.id, result.data.qr);
-      saveReleaseToken(result.data.id, result.data.releaseToken);
+      saveClaimToken(result.data.id, result.data.claimToken);
     }
   } else if (action === "checkin" && desk.claim) {
-    result = await postJson(`/api/claims/${desk.claim.id}/checkin`);
+    result = await postJson(`/api/claims/${desk.claim.id}/checkin`, { token: claimToken(desk.claim.id) });
   } else if (action === "release" && desk.claim) {
-    result = await postJson(`/api/claims/${desk.claim.id}/release`, { token: releaseToken(desk.claim.id) });
+    result = await postJson(`/api/claims/${desk.claim.id}/release`, { token: claimToken(desk.claim.id) });
   } else if (action === "report-free" || action === "report-taken") {
     result = await postJson(`${deskPath}/report`, { status: action === "report-free" ? "free" : "taken" });
   }
+  busy = false;
   sheetMsg = result.ok ? "" : (result.data.error ?? "Something went wrong, try again.");
   renderSheet(true);
 }
@@ -414,22 +442,102 @@ setInterval(() => {
   }
 }, 250);
 
-function apply(snapshot) {
+const ACTIVITY_TEXT = {
+  claim: (e) => `<strong>${escapeHtml(e.actor)}</strong> claimed`,
+  checkin: (e) => `<strong>${escapeHtml(e.actor)}</strong> checked in at`,
+  release: (e) => `<strong>${escapeHtml(e.actor)}</strong> left`,
+  expire: (e) =>
+    e.detail === "hold-ended"
+      ? `<strong>${escapeHtml(e.actor)}</strong>'s 2h hold ended on`
+      : `<strong>${escapeHtml(e.actor)}</strong> didn't check in, released`,
+  report: (e) => `<strong>${escapeHtml(e.actor)}</strong> reported ${e.detail === "free" ? "free" : "taken"}:`,
+};
+
+function when(ts) {
+  const d = new Date(ts);
+  const today = new Date().toDateString() === d.toDateString();
+  return today ? clock(ts) : `${d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${clock(ts)}`;
+}
+
+function renderActivity() {
+  if (activity.length === 0) {
+    activityList.innerHTML = `<li class="placeholder">Nothing yet. Claim a desk or report one to start the log.</li>`;
+    return;
+  }
+  activityList.innerHTML = activity
+    .map((e) => {
+      const desk = desksById.get(e.deskId);
+      const where = desk ? `${desk.label}, ${desk.zone}` : e.deskId;
+      return `<li class="act act--${e.kind}${e.kind === "report" ? `-${e.detail}` : ""}">
+        <time datetime="${new Date(e.at).toISOString()}">${when(e.at)}</time>
+        <span>${ACTIVITY_TEXT[e.kind]?.(e) ?? escapeHtml(e.kind)} ${escapeHtml(where)}</span>
+      </li>`;
+    })
+    .join("");
+}
+
+function setConn(state) {
+  conn.className = `conn conn--${state}`;
+  conn.textContent = { live: "Live", connecting: "Connecting…", offline: "Reconnecting…" }[state];
+}
+
+function apply(payload) {
+  const snapshot = payload.desks;
+  activity = payload.activity;
   desks = snapshot;
   desksById = new Map(desks.map((d) => [d.id, d]));
   if (!built) buildMap();
   updateMap();
   renderSheet();
+  renderActivity();
+}
+
+// On reconnect the server sends a full snapshot first, so nothing missed
+// while offline is lost; the indicator tells people the map may be stale.
+// The server pings every 15s, so 35s of silence means the connection is dead
+// even if the browser hasn't noticed (it often doesn't on a dropped network).
+const STALE_MS = 35_000;
+let source = null;
+let lastHeard = 0;
+
+function reconnect() {
+  setConn("offline");
+  source?.close();
+  source = null;
+  setTimeout(connectEvents, 2000);
 }
 
 function connectEvents() {
-  const source = new EventSource("/api/events");
-  source.onmessage = (ev) => apply(JSON.parse(ev.data));
-  source.onerror = () => {
-    source.close();
-    setTimeout(connectEvents, 2000);
+  if (source) return;
+  source = new EventSource("/api/events");
+  lastHeard = Date.now();
+  const heard = () => {
+    lastHeard = Date.now();
+    setConn("live");
   };
+  source.onopen = () => {
+    // A "couldn't reach the server" left from while offline is now stale.
+    if (sheetMsg.startsWith("Couldn't reach")) {
+      sheetMsg = "";
+      renderSheet(true);
+    }
+    heard();
+  };
+  source.addEventListener("ping", heard);
+  source.onmessage = (ev) => {
+    heard();
+    apply(JSON.parse(ev.data));
+  };
+  source.onerror = reconnect;
 }
+
+setInterval(() => {
+  if (source && Date.now() - lastHeard > STALE_MS) reconnect();
+}, 5000);
+window.addEventListener("offline", reconnect);
+window.addEventListener("online", () => {
+  if (!source) connectEvents();
+});
 
 renderSheet();
 connectEvents();

@@ -37,12 +37,51 @@ quietly "fix" the count without a crowdsourced-report-driven reason.
   not drop it, and any new path that creates or revives a claim must go
   through it rather than around it. (Correction: the first version checked
   then awaited the body, and two overlapping requests both got 201.)
-- **Only the claimer can release a claim.** Each claim gets a random release
-  token returned once, in the 201 to the claimer, and in the QR check-in
-  link's `#fragment` (never sent to the server). Release requires it (403
-  otherwise) and refuses a claim that's no longer live (409). The token must
-  never appear in `/api/desks`, the SSE stream, or logs. This is not an
-  account: it proves "I made this claim", nothing about who the person is.
+- **Only the claimer can check in to or release a claim; this is enforced on
+  the server, not by hiding buttons.** Each claim gets a random claim token
+  returned once, in the 201 to the claimer, and in the QR check-in link's
+  `#fragment` (which browsers never send to the server). Check-in and release
+  both require it (403 otherwise) and refuse a claim that's no longer live
+  (409). The token must never appear in `/api/desks`, `/api/activity`, the
+  SSE stream, or logs. This is not an account: it proves "I made this claim",
+  nothing about who the person is. Anyone may report (free/taken) on any
+  desk, by design: reports are observations, not ownership. (Correction: the
+  release fix first left check-in open; the two-profile browser check showed
+  a second person a working "Check in" button on someone else's claim.)
+
+## History persists; live state expires
+
+- Claims are deliberately short-lived, so the map alone would look empty to
+  anyone returning the next day. The `activity` table is the durable record:
+  every claim, check-in, release, auto-release (`expire`, with
+  `unconfirmed` or `hold-ended`) and report is appended with its timestamp
+  and actor's chosen name. **Append-only: never update or delete rows**, and
+  every new state-changing route must `record()` its event. Refused actions
+  (403/409) record nothing. Covered by `spec/activity-log.test.ts`.
+- Each event is also printed to stdout as one JSON line, so `fly logs`
+  narrates who did what live. Never log claim tokens.
+- The 1s sweep expires both unconfirmed claims and checked-in claims past
+  their 2h hold, so both auto-releases reach other sessions and the log.
+
+## Holds up under bad conditions
+
+The marker tests at **1920×1080** and **390×844** in separate Chrome
+profiles, with resizes, the keyboard and a slow connection. Any UI change must
+keep all of these true. `pnpm check` sees only HTTP, so also run
+`pnpm browser-check` (two Chrome profiles, one per viewport, against a running
+app; `scripts/browser-check.mjs`) and look at its screenshots before calling a
+UI change done:
+
+- No horizontal scroll at either viewport; the desk sheet stays visible when
+  resized between them mid-interaction.
+- Every desk is reachable by Tab and opened by Enter/Space; Escape closes the
+  sheet and returns focus to the desk.
+- Action buttons disable while a request is in flight (no double-submits);
+  requests time out after 10s with a visible error rather than hanging.
+- The server sends an SSE `ping` every 15s; the page treats 35s of silence or
+  a browser `offline` event as disconnected, shows "Reconnecting…", and
+  reconnects. On reconnect it gets a full snapshot, so changes made while it
+  was offline are not lost.
 
 ## Crowdsourced reports never overwrite claim status
 

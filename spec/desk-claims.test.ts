@@ -41,6 +41,8 @@ it("lets one claim through and refuses an overlapping one", async () => {
 
   const checkin = await fetch(new URL(`/api/claims/${claim.id}/checkin`, baseUrl), {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: claim.claimToken }),
   });
   expect(checkin.status).toBe(200);
 
@@ -145,17 +147,38 @@ it("lets exactly one of two overlapping claims on a free desk through", async ()
   expect(statuses).toEqual([201, 409]);
 });
 
+it("only lets the claimer check in to their own claim", async () => {
+  const deskId = "2.27-2";
+  const claim = await (await claimDesk(deskId, "jo")).json();
+
+  const checkin = (token?: string) =>
+    fetch(new URL(`/api/claims/${claim.id}/checkin`, baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(token === undefined ? {} : { token }),
+    });
+
+  expect((await checkin()).status).toBe(403);
+  expect((await checkin("not-the-token")).status).toBe(403);
+  let desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
+  expect(desks.find((d: { id: string }) => d.id === deskId).status).toBe("pending");
+
+  expect((await checkin(claim.claimToken)).status).toBe(200);
+  desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
+  expect(desks.find((d: { id: string }) => d.id === deskId).status).toBe("occupied");
+});
+
 it("only lets the claimer release their own claim", async () => {
   const deskId = "2.27-1";
 
   const res = await claimDesk(deskId, "erin");
   expect(res.status).toBe(201);
   const claim = await res.json();
-  expect(typeof claim.releaseToken).toBe("string");
+  expect(typeof claim.claimToken).toBe("string");
 
   // The token is a secret for the claimer: it must not leak to other sessions.
   const listing = await (await fetch(new URL("/api/desks", baseUrl))).text();
-  expect(listing).not.toContain(claim.releaseToken);
+  expect(listing).not.toContain(claim.claimToken);
 
   expect((await release(claim.id)).status).toBe(403);
   expect((await release(claim.id, "not-the-token")).status).toBe(403);
@@ -163,10 +186,10 @@ it("only lets the claimer release their own claim", async () => {
   let desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
   expect(desks.find((d: { id: string }) => d.id === deskId).status).toBe("pending");
 
-  expect((await release(claim.id, claim.releaseToken)).status).toBe(200);
+  expect((await release(claim.id, claim.claimToken)).status).toBe(200);
   desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
   expect(desks.find((d: { id: string }) => d.id === deskId).status).toBe("available");
 
   // Releasing an already-released claim is refused, not silently accepted.
-  expect((await release(claim.id, claim.releaseToken)).status).toBe(409);
+  expect((await release(claim.id, claim.claimToken)).status).toBe(409);
 });

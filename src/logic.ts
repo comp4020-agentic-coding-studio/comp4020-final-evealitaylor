@@ -40,6 +40,21 @@ export interface OccupancyReport {
 
 export type DeskStatus = "available" | "pending" | "occupied";
 
+// One line of the who-did-what history. "expire" is the server's 1s sweep
+// auto-releasing a claim; its actor is the claim's owner, not the system.
+export type ActivityKind = "claim" | "checkin" | "release" | "expire" | "report";
+
+export interface ActivityEvent {
+  id: number;
+  at: number;
+  kind: ActivityKind;
+  deskId: string;
+  claimId: number | null;
+  actor: string;
+  // report: "free" | "taken"; expire: "unconfirmed" | "hold-ended"
+  detail: string | null;
+}
+
 export function isClaimExpired(claim: Claim, now: number): boolean {
   if (claim.status === "released" || claim.status === "expired") return false;
   return claim.expiresAt <= now;

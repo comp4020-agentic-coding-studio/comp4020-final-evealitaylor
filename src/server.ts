@@ -10,6 +10,8 @@ import {
   getClaims,
   getClaim,
   getReports,
+  getActivity,
+  insertActivity,
   getClaimToken,
   insertClaimIfFree,
   markCheckedIn,
@@ -25,12 +27,15 @@ import {
   CHECKIN_GRACE_MS,
   CLAIM_HOLD_MS,
 } from "./logic.ts";
+import type { ActivityEvent } from "./logic.ts";
 import { renderReadmeHtml } from "./readme.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const PUBLIC_DIR = resolve(fileURLToPath(new URL("../public/", import.meta.url)));
 
 const sseClients = new Set<ServerResponse>();
+// How much history the page shows; the table itself keeps everything.
+const ACTIVITY_LIMIT = 50;
 
 function snapshot() {
   const now = Date.now();
@@ -55,20 +60,51 @@ function snapshot() {
   });
 }
 
+function livePayload(): string {
+  return `data: ${JSON.stringify({ desks: snapshot(), activity: getActivity(ACTIVITY_LIMIT) })}\n\n`;
+}
+
 function broadcast(): void {
   if (sseClients.size === 0) return;
-  const payload = `data: ${JSON.stringify(snapshot())}\n\n`;
+  const payload = livePayload();
   for (const client of sseClients) client.write(payload);
 }
 
-// Sweeps unconfirmed claims past their check-in deadline at least once a
-// second, so auto-release is pushed to open sessions rather than only
+// Every state change is recorded in the activity table (what the page and
+// `/api/activity` show) and written as one JSON line to stdout, so
+// `fly logs` narrates who did what as it happens.
+function record(event: Omit<ActivityEvent, "id">): void {
+  const saved = insertActivity(event);
+  console.log(JSON.stringify({ ...saved, at: new Date(saved.at).toISOString() }));
+}
+
+// A ping every 15s keeps idle SSE connections from being dropped by Fly's
+// proxy between real updates, and lets the page notice a dead connection
+// (it treats 35s of silence as offline) since a dropped network often fires
+// no error on an open EventSource.
+setInterval(() => {
+  for (const client of sseClients) client.write("event: ping\ndata: \n\n");
+}, 15_000);
+
+// Sweeps claims past their deadline at least once a second (unconfirmed ones
+// past the check-in window, checked-in ones past the 2h hold), so
+// auto-release is pushed to open sessions and logged rather than only
 // discovered the next time someone happens to fetch desk state.
 setInterval(() => {
   const now = Date.now();
-  const expired = getClaims().filter((c) => c.status === "pending" && isClaimExpired(c, now));
+  const expired = getClaims().filter((c) => isClaimExpired(c, now));
   if (expired.length === 0) return;
-  for (const claim of expired) markExpired(claim.id);
+  for (const claim of expired) {
+    markExpired(claim.id);
+    record({
+      at: now,
+      kind: "expire",
+      deskId: claim.deskId,
+      claimId: claim.id,
+      actor: claim.name,
+      detail: claim.status === "pending" ? "unconfirmed" : "hold-ended",
+    });
+  }
   broadcast();
 }, 1000);
 
@@ -143,13 +179,17 @@ const server = createServer(async (req, res) => {
     return sendJson(res, 200, snapshot());
   }
 
+  if (method === "GET" && pathname === "/api/activity") {
+    return sendJson(res, 200, getActivity(ACTIVITY_LIMIT));
+  }
+
   if (method === "GET" && pathname === "/api/events") {
     res.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
-    res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+    res.write(livePayload());
     sseClients.add(res);
     req.on("close", () => sseClients.delete(res));
     return;
@@ -169,6 +209,7 @@ const server = createServer(async (req, res) => {
     const token = randomUUID();
     const claim = insertClaimIfFree(deskId, name, token, now, now + CHECKIN_GRACE_MS);
     if (!claim) return sendJson(res, 409, { error: "desk is already claimed" });
+    record({ at: now, kind: "claim", deskId, claimId: claim.id, actor: name, detail: null });
     const checkinUrl = `${url.origin}/checkin/${claim.id}#${token}`;
     const qr = await toDataURL(checkinUrl);
     broadcast();
@@ -178,7 +219,8 @@ const server = createServer(async (req, res) => {
       name,
       expiresAt: claim.expiresAt,
       // Only ever sent to the claimer; never in snapshots or broadcasts.
-      releaseToken: token,
+      // Required to check in or release.
+      claimToken: token,
       checkinUrl,
       qr,
     });
@@ -189,11 +231,16 @@ const server = createServer(async (req, res) => {
     const claimId = Number(checkinMatch[1]);
     const claim = getClaim(claimId);
     if (!claim) return sendJson(res, 404, { error: "no such claim" });
+    const body = await readJsonBody(req);
+    if (!tokenMatches(getClaimToken(claimId), body.token)) {
+      return sendJson(res, 403, { error: "only the person who claimed this desk can check in" });
+    }
     const now = Date.now();
     if (claim.status !== "pending" || isClaimExpired(claim, now)) {
       return sendJson(res, 409, { error: "claim is no longer pending" });
     }
     markCheckedIn(claimId, now, now + CLAIM_HOLD_MS);
+    record({ at: now, kind: "checkin", deskId: claim.deskId, claimId, actor: claim.name, detail: null });
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
@@ -211,6 +258,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 409, { error: "claim is no longer live" });
     }
     markReleased(claimId);
+    record({ at: Date.now(), kind: "release", deskId: claim.deskId, claimId, actor: claim.name, detail: null });
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
@@ -223,7 +271,12 @@ const server = createServer(async (req, res) => {
     const body = await readJsonBody(req);
     const status = body.status === "free" || body.status === "taken" ? body.status : null;
     if (!status) return sendJson(res, 400, { error: "status must be 'free' or 'taken'" });
-    insertReport(deskId, status, Date.now());
+    const now = Date.now();
+    insertReport(deskId, status, now);
+    // Reports are anonymous by default; a name is optional, never required.
+    const rawName = typeof body.name === "string" ? body.name.trim() : "";
+    const actor = rawName ? rawName.slice(0, 40) : "Anonymous";
+    record({ at: now, kind: "report", deskId, claimId: null, actor, detail: status });
     broadcast();
     return sendJson(res, 201, { ok: true });
   }

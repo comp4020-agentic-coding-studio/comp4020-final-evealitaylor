@@ -24,17 +24,24 @@
   const title = document.getElementById("title");
   const detail = document.getElementById("detail");
   const claimId = location.pathname.split("/").filter(Boolean).pop();
-  // The QR link carries the release token in its #fragment (never sent to the
-  // server), so the phone that checks in can also tap "I'm leaving" later.
-  const token = location.hash.slice(1);
+  // The QR link carries the claim token in its #fragment (never sent to the
+  // server as part of the URL). It proves this phone belongs to the claimer,
+  // and is kept so the phone can also tap "I'm leaving" later.
+  let token = location.hash.slice(1);
   if (token) {
-    try { localStorage.setItem(`releaseToken:${claimId}`, token); } catch {}
+    try { localStorage.setItem(`claimToken:${claimId}`, token); } catch {}
     history.replaceState(null, "", location.pathname);
+  } else {
+    try { token = localStorage.getItem(`claimToken:${claimId}`) ?? ""; } catch {}
   }
 
   // The check-in is a POST sent from here rather than done on page load server-side,
   // so link previewers that fetch the URL without running scripts can't check anyone in.
-  const res = await fetch(`/api/claims/${encodeURIComponent(claimId)}/checkin`, { method: "POST" });
+  const res = await fetch(`/api/claims/${encodeURIComponent(claimId)}/checkin`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
   const body = await res.json().catch(() => ({}));
   if (res.ok) {
     pill.className = "pill pill--green";
@@ -46,7 +53,9 @@
     pill.textContent = "Not checked in";
     title.textContent = "Couldn't check in";
     detail.textContent =
-      res.status === 409
+      res.status === 403
+        ? "This check-in link isn't for this claim. Scan the QR code shown to whoever claimed the desk."
+        : res.status === 409
         ? "This claim has already been checked in, released, or ran past its 20-second window. Claim the desk again if it's still free."
         : (body.error ?? "Something went wrong. Try claiming the desk again.");
   }
