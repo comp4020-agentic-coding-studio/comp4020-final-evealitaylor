@@ -53,15 +53,15 @@ describe("validateSignup", () => {
 });
 
 describe("passphrases and sessions", () => {
-  it("stores passphrases salted, so two identical passphrases hash differently", () => {
-    const a = hashPassphrase("same passphrase");
-    const b = hashPassphrase("same passphrase");
+  it("stores passphrases salted, so two identical passphrases hash differently", async () => {
+    const a = await hashPassphrase("same passphrase");
+    const b = await hashPassphrase("same passphrase");
     expect(a).not.toBe(b);
     expect(a).not.toContain("same passphrase");
-    expect(verifyPassphrase("same passphrase", a)).toBe(true);
-    expect(verifyPassphrase("same passphrase", b)).toBe(true);
-    expect(verifyPassphrase("wrong passphrase", a)).toBe(false);
-    expect(verifyPassphrase("same passphrase", "garbage")).toBe(false);
+    expect(await verifyPassphrase("same passphrase", a)).toBe(true);
+    expect(await verifyPassphrase("same passphrase", b)).toBe(true);
+    expect(await verifyPassphrase("wrong passphrase", a)).toBe(false);
+    expect(await verifyPassphrase("same passphrase", "garbage")).toBe(false);
   });
 
   it("stores only a hash of the session token", () => {

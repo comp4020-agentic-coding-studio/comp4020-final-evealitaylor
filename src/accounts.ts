@@ -1,7 +1,12 @@
 // Account rules that don't need the database: validating what someone signs
 // up with, and hashing passphrases and session tokens. Kept pure so
 // spec/accounts-logic.test.ts can check them without a running server.
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
+
+// Async: scrypt is deliberately slow (~40ms), and the sync version would
+// block every live update while one person signs in.
+const scrypt = promisify(scryptCb) as (pass: string, salt: Buffer, len: number) => Promise<Buffer>;
 
 // Other users only ever see the handle. Full name and student ID are held
 // server-side for record keeping and returned only to their owner.
@@ -55,17 +60,18 @@ export function validateSignup(body: Record<string, unknown>): SignupResult {
 }
 
 // scrypt with a per-user salt; stored as "salt:hash", both hex.
-export function hashPassphrase(passphrase: string): string {
+export async function hashPassphrase(passphrase: string): Promise<string> {
   const salt = randomBytes(16);
-  const hash = scryptSync(passphrase, salt, 32);
+  const hash = await scrypt(passphrase, salt, 32);
   return `${salt.toString("hex")}:${hash.toString("hex")}`;
 }
 
-export function verifyPassphrase(passphrase: string, stored: string): boolean {
+export async function verifyPassphrase(passphrase: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(":");
   if (!saltHex || !hashHex) return false;
   const expected = Buffer.from(hashHex, "hex");
-  const actual = scryptSync(passphrase, Buffer.from(saltHex, "hex"), expected.length);
+  if (expected.length === 0) return false;
+  const actual = await scrypt(passphrase, Buffer.from(saltHex, "hex"), expected.length);
   return timingSafeEqual(actual, expected);
 }
 

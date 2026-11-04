@@ -121,6 +121,15 @@ side. The UI must surface both signals, not just one.
 
 ## Real-time and persistence
 
+- **The showcase room is the load target.** `pnpm load-check [URL] [N]`
+  opens N live viewers (default 60), then has 40 new accounts claim 20 desks
+  two-per-desk at once. It must show zero double-booked desks, zero missed
+  deliveries, and every change at every viewer within 1s; it cleans up its
+  accounts and claims. Run it after changes to the claim path, broadcasts
+  or auth. Baseline (local, 200MB heap cap): p95 delivery ~330ms, peak RSS
+  ~150MB, claim responses ~215ms under the burst (QR generation dominates).
+- Nothing CPU-heavy runs synchronously on the request path: passphrase
+  hashing uses async scrypt so one sign-in can't stall every live update.
 - Broadcasts are coalesced into one snapshot per 100ms (`BROADCAST_MS`), so
   a room connecting or claiming at once costs one send per window, not one
   per event per client. Keep it well under the 1s budget; don't remove the

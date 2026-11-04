@@ -11,7 +11,8 @@
     "start": "node src/server.ts",
     "browser-check": "node scripts/browser-check.mjs",
     "bench:history": "bash scripts/history-bench.sh",
-    "a11y-check": "node scripts/a11y-check.mjs"
+    "a11y-check": "node scripts/a11y-check.mjs",
+    "load-check": "node scripts/showcase-load.mjs"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",

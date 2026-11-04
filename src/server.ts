@@ -420,7 +420,7 @@ const server = createServer(async (req, res) => {
     if (!input.ok) return sendJson(res, 400, { error: input.error });
     const { handle, fullName, studentId, passphrase } = input.value;
     const now = Date.now();
-    const user = insertUser(handle, fullName, studentId, hashPassphrase(passphrase), now);
+    const user = insertUser(handle, fullName, studentId, await hashPassphrase(passphrase), now);
     if (!user) return sendJson(res, 409, { error: "That handle is taken. Pick another." });
     console.log(JSON.stringify({ kind: "signup", userId: user.id, handle: user.handle, at: new Date(now).toISOString() }));
     return startSession(req, res, user, 201);
@@ -432,7 +432,7 @@ const server = createServer(async (req, res) => {
     const passphrase = typeof body.passphrase === "string" ? body.passphrase : "";
     const found = handle ? getUserWithHash(handle) : null;
     // Same message whether the handle or passphrase is wrong.
-    if (!found || !verifyPassphrase(passphrase, found.passHash)) {
+    if (!found || !(await verifyPassphrase(passphrase, found.passHash))) {
       return sendJson(res, 401, { error: "Handle or passphrase is wrong." });
     }
     return startSession(req, res, found.user, 200);
