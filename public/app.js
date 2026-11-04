@@ -621,7 +621,7 @@ function renderAccount(mode, msg = "", data = null) {
         <dt>Member since</dt><dd>${new Date(u.createdAt).toLocaleDateString()}</dd>
       </dl>
       <h3>Your history</h3>
-      <ol class="activity-list me-history">${hist}</ol>
+      <ol class="activity-list me-history" tabindex="0" aria-label="Your history">${hist}</ol>
       ${msg ? `<p class="msg" role="alert">${escapeHtml(msg)}</p>` : ""}
       <div class="actions actions--split">
         <button class="btn btn--danger" data-acct="delete">Delete my account</button>

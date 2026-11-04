@@ -1,7 +1,10 @@
 :root {
   color-scheme: light;
   --navy: #23597a;
-  --slate: #4d85a6;
+  /* Text and buttons use colours at >= 4.5:1 contrast (WCAG AA); the bright
+     status colours below are for fills, with dark text on them. Checked by
+     `pnpm a11y-check`. */
+  --slate: #3a6f8f;
   --slate-soft: #7fa7bf;
   --green: #1ccc5b;
   --yellow: #f7d61b;
@@ -9,7 +12,9 @@
   --orange: #ff7a1a;
   --violet: #7b3fe4;
   --ink: #3b4a55;
-  --muted: #7d8c97;
+  --muted: #5f6e78;
+  --on-bright: #0b3d1c;
+  --red-text: #d32020;
   --line: #cfdbe5;
   --map-bg: #e3eaf0;
   --room: #f1f5f8;
@@ -46,7 +51,9 @@ body {
   font-weight: 700;
   font-size: 34px;
   letter-spacing: -0.5px;
-  color: var(--green);
+  /* Deeper than --green: the white outline is what the letters are read
+     against, and bright green on white is only 2.1:1. */
+  color: #0f7a3a;
   text-shadow:
     3px 0 0 #fff, -3px 0 0 #fff, 0 3px 0 #fff, 0 -3px 0 #fff,
     2px 2px 0 #fff, -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff;
@@ -117,10 +124,10 @@ body {
   white-space: nowrap;
 }
 
-.pill--green { background: var(--green); }
+.pill--green { background: var(--green); color: var(--on-bright); }
 .pill--yellow { background: var(--yellow); color: #3b3300; }
-.pill--red { background: var(--red); }
-.pill--orange { background: var(--orange); }
+.pill--red { background: var(--red-text); }
+.pill--orange { background: var(--orange); color: #3b1a00; }
 
 .pulse {
   display: grid;
@@ -260,15 +267,17 @@ body {
   outline: none;
 }
 
+/* A dark outline makes every desk shape clear 3:1 against the map whatever
+   its fill, so status isn't carried by colour alone against a pale room. */
 .seat-body {
-  stroke: transparent;
-  stroke-width: 2;
+  stroke: rgba(11, 40, 30, 0.55);
+  stroke-width: 1;
   transition: fill 0.25s;
 }
 
 .seat--available .seat-body { fill: var(--green); }
 .seat--pending .seat-body { fill: var(--yellow); }
-.seat--occupied .seat-body { fill: var(--red); }
+.seat--occupied .seat-body { fill: var(--red-text); }
 
 .seat:hover .seat-body {
   filter: brightness(1.08);
@@ -277,10 +286,11 @@ body {
 .seat--selected .seat-body,
 .seat:focus-visible .seat-body {
   stroke: var(--navy);
+  stroke-width: 2;
 }
 
 .seat-num {
-  fill: #fff;
+  fill: var(--on-bright);
   font-size: 8.5px;
   font-weight: 700;
   text-anchor: middle;
@@ -289,6 +299,10 @@ body {
 
 .seat--pending .seat-num {
   fill: #5a4d00;
+}
+
+.seat--occupied .seat-num {
+  fill: #fff;
 }
 
 .seat-ring {
@@ -617,9 +631,14 @@ body {
   background: currentColor;
 }
 
-.conn--live { color: #138a3e; }
+.conn--live { color: #0f7a3a; }
 .conn--connecting { color: var(--muted); }
 .conn--offline { color: var(--red); }
+
+.activity-list:focus-visible {
+  outline: 3px solid var(--slate);
+  outline-offset: 2px;
+}
 
 .activity-list {
   list-style: none;

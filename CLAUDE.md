@@ -74,6 +74,14 @@ keep all of these true. `pnpm check` sees only HTTP, so also run
 app; `scripts/browser-check.mjs`) and look at its screenshots before calling a
 UI change done:
 
+- `pnpm a11y-check` (axe-core, both viewports: map, desk sheet, signup
+  dialog) reports no serious or critical issues. Text is at least 4.5:1
+  (3:1 for large text); bright status colours are fills only, with dark
+  text on green/yellow and white only on the darker red. Every desk shape
+  is outlined so it clears 3:1 against the room. Any scrolling region is
+  keyboard-focusable. Don't reintroduce the old pale greys or bright-green
+  text to match a mockup. (Correction: the first scan found 80+ contrast
+  failures, including the logo at 2.1:1 against its own outline.)
 - No horizontal scroll at either viewport; the desk sheet stays visible when
   resized between them mid-interaction.
 - Every desk is reachable by Tab and opened by Enter/Space; Escape closes the
