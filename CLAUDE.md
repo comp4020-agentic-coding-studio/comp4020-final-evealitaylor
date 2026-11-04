@@ -29,6 +29,20 @@ quietly "fix" the count without a crowdsourced-report-driven reason.
   return 409, never silently queue or overwrite. Covered by
   `spec/desk-claims.test.ts`; do not weaken that test to make a feature
   easier to ship.
+- **The invariant must hold under concurrent requests, not just sequential
+  ones.** In the claim route, never `await` anything (body parsing, QR
+  generation, I/O) between checking a desk is free and inserting the claim;
+  `insertClaimIfFree` in `src/db.ts` does both synchronously. The partial
+  unique index `one_live_claim_per_desk` is the database-level backstop: do
+  not drop it, and any new path that creates or revives a claim must go
+  through it rather than around it. (Correction: the first version checked
+  then awaited the body, and two overlapping requests both got 201.)
+- **Only the claimer can release a claim.** Each claim gets a random release
+  token returned once, in the 201 to the claimer, and in the QR check-in
+  link's `#fragment` (never sent to the server). Release requires it (403
+  otherwise) and refuses a claim that's no longer live (409). The token must
+  never appear in `/api/desks`, the SSE stream, or logs. This is not an
+  account: it proves "I made this claim", nothing about who the person is.
 
 ## Crowdsourced reports never overwrite claim status
 
@@ -64,6 +78,17 @@ side. The UI must surface both signals, not just one.
   end-to-end test. Keep it singular — don't add more wall-clock-waiting
   tests; CI time budget and `CHECKIN_GRACE_MS` were chosen together so this
   one test stays fast.
+- **A new test must be shown to fail against the code it guards against**
+  before it counts. Run it against the pre-fix commit (e.g. `git show
+  HEAD:src/server.ts` into a temp dir) and confirm it goes red. Localhost
+  hides network timing, and the first concurrency test (ten parallel
+  `fetch`es) passed against the buggy code because each request's body
+  arrived with its headers. Concurrency tests must hold the request bodies
+  back (send headers, then bodies) to reproduce the real-network interleaving.
+- **Schema changes migrate in place.** The production SQLite file already
+  holds data; `src/db.ts` must upgrade an existing database (add columns with
+  `ALTER TABLE`, clean up rows that would violate a new constraint) on
+  startup, never assume a fresh file or ask anyone to delete `/data`.
 
 ## Authorship boundary
 

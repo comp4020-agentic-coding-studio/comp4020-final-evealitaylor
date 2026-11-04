@@ -3,13 +3,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { toDataURL } from "qrcode";
 import {
   getDesks,
   getClaims,
   getClaim,
   getReports,
-  insertClaim,
+  getClaimToken,
+  insertClaimIfFree,
   markCheckedIn,
   markReleased,
   markExpired,
@@ -79,6 +81,13 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   } catch {
     return {};
   }
+}
+
+function tokenMatches(expected: string | null, given: unknown): boolean {
+  if (!expected || typeof given !== "string") return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(given);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -151,15 +160,16 @@ const server = createServer(async (req, res) => {
     const deskId = decodeURIComponent(claimMatch[1]!);
     const desk = getDesks().find((d) => d.id === deskId);
     if (!desk) return sendJson(res, 404, { error: "no such desk" });
-    const now = Date.now();
-    if (activeClaimForDesk(getClaims(), deskId, now)) {
-      return sendJson(res, 409, { error: "desk is already claimed" });
-    }
+    // Read the body before checking the desk is free: an await between the
+    // check and the insert would let two concurrent claims both pass it.
     const body = await readJsonBody(req);
     const rawName = typeof body.name === "string" ? body.name.trim() : "";
     const name = rawName ? rawName.slice(0, 40) : "Anonymous";
-    const claim = insertClaim(deskId, name, now, now + CHECKIN_GRACE_MS);
-    const checkinUrl = `${url.origin}/checkin/${claim.id}`;
+    const now = Date.now();
+    const token = randomUUID();
+    const claim = insertClaimIfFree(deskId, name, token, now, now + CHECKIN_GRACE_MS);
+    if (!claim) return sendJson(res, 409, { error: "desk is already claimed" });
+    const checkinUrl = `${url.origin}/checkin/${claim.id}#${token}`;
     const qr = await toDataURL(checkinUrl);
     broadcast();
     return sendJson(res, 201, {
@@ -167,6 +177,8 @@ const server = createServer(async (req, res) => {
       deskId,
       name,
       expiresAt: claim.expiresAt,
+      // Only ever sent to the claimer; never in snapshots or broadcasts.
+      releaseToken: token,
       checkinUrl,
       qr,
     });
@@ -191,6 +203,13 @@ const server = createServer(async (req, res) => {
     const claimId = Number(releaseMatch[1]);
     const claim = getClaim(claimId);
     if (!claim) return sendJson(res, 404, { error: "no such claim" });
+    const body = await readJsonBody(req);
+    if (!tokenMatches(getClaimToken(claimId), body.token)) {
+      return sendJson(res, 403, { error: "only the person who claimed this desk can release it" });
+    }
+    if (claim.status !== "pending" && claim.status !== "active") {
+      return sendJson(res, 409, { error: "claim is no longer live" });
+    }
     markReleased(claimId);
     broadcast();
     return sendJson(res, 200, { ok: true });

@@ -34,6 +34,26 @@ db.exec(`
   );
 `);
 
+// Release token: a secret handed only to whoever made the claim, so nobody
+// else can free their desk. Added after launch, so older rows have none.
+const claimColumns = db.prepare("PRAGMA table_info(claims)").all() as { name: string }[];
+if (!claimColumns.some((c) => c.name === "token")) {
+  db.exec("ALTER TABLE claims ADD COLUMN token TEXT");
+}
+
+// The database itself refuses a second live claim on a desk, as a backstop
+// to the check in the claim route. Any duplicates left from before the index
+// existed are expired first (newest wins) so creating it can't fail.
+db.exec(`
+  UPDATE claims SET status = 'expired'
+  WHERE status IN ('pending', 'active')
+    AND id NOT IN (
+      SELECT MAX(id) FROM claims WHERE status IN ('pending', 'active') GROUP BY desk_id
+    );
+  CREATE UNIQUE INDEX IF NOT EXISTS one_live_claim_per_desk
+    ON claims (desk_id) WHERE status IN ('pending', 'active');
+`);
+
 const deskCount = db.prepare("SELECT COUNT(*) AS n FROM desks").get() as { n: number };
 if (deskCount.n === 0) {
   const insert = db.prepare("INSERT INTO desks (id, zone, label) VALUES (?, ?, ?)");
@@ -50,6 +70,7 @@ interface ClaimRow {
   checked_in_at: number | null;
   expires_at: number;
   status: ClaimStatus;
+  token: string | null;
 }
 
 interface ReportRow {
@@ -100,21 +121,43 @@ export function getReports(): OccupancyReport[] {
   return rows.map(reportFromRow);
 }
 
-export function insertClaim(deskId: string, name: string, startedAt: number, expiresAt: number): Claim {
-  const result = db
-    .prepare(
-      "INSERT INTO claims (desk_id, name, started_at, checked_in_at, expires_at, status) VALUES (?, ?, ?, NULL, ?, 'pending')",
-    )
-    .run(deskId, name, startedAt, expiresAt);
-  return {
-    id: Number(result.lastInsertRowid),
-    deskId,
-    name,
-    startedAt,
-    checkedInAt: null,
-    expiresAt,
-    status: "pending",
-  };
+// Inserts a pending claim, or returns null if the desk already has a live
+// one. Claims whose time has run out but that the 1s sweep hasn't reached yet
+// are expired first, so they can't block a new claim via the unique index.
+export function insertClaimIfFree(
+  deskId: string,
+  name: string,
+  token: string,
+  startedAt: number,
+  expiresAt: number,
+): Claim | null {
+  db.prepare(
+    "UPDATE claims SET status = 'expired' WHERE desk_id = ? AND status IN ('pending', 'active') AND expires_at <= ?",
+  ).run(deskId, startedAt);
+  try {
+    const result = db
+      .prepare(
+        "INSERT INTO claims (desk_id, name, started_at, checked_in_at, expires_at, status, token) VALUES (?, ?, ?, NULL, ?, 'pending', ?)",
+      )
+      .run(deskId, name, startedAt, expiresAt, token);
+    return {
+      id: Number(result.lastInsertRowid),
+      deskId,
+      name,
+      startedAt,
+      checkedInAt: null,
+      expiresAt,
+      status: "pending",
+    };
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/.test(err.message)) return null;
+    throw err;
+  }
+}
+
+export function getClaimToken(id: number): string | null {
+  const row = db.prepare("SELECT token FROM claims WHERE id = ?").get(id) as { token: string | null } | undefined;
+  return row?.token ?? null;
 }
 
 export function markCheckedIn(id: number, checkedInAt: number, expiresAt: number): void {

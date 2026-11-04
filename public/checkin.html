@@ -24,6 +24,13 @@
   const title = document.getElementById("title");
   const detail = document.getElementById("detail");
   const claimId = location.pathname.split("/").filter(Boolean).pop();
+  // The QR link carries the release token in its #fragment (never sent to the
+  // server), so the phone that checks in can also tap "I'm leaving" later.
+  const token = location.hash.slice(1);
+  if (token) {
+    try { localStorage.setItem(`releaseToken:${claimId}`, token); } catch {}
+    history.replaceState(null, "", location.pathname);
+  }
 
   // The check-in is a POST sent from here rather than done on page load server-side,
   // so link previewers that fetch the URL without running scripts can't check anyone in.

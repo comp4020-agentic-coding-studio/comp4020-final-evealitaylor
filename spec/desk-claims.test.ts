@@ -1,7 +1,9 @@
+import { request } from "node:http";
 import { expect, inject, it } from "vitest";
 
 // HTTP-level checks against the running app (spec/global-setup.ts finds it).
-// Exercises the "no two overlapping confirmed claims on one desk" invariant.
+// Exercises the "no two live claims on one desk" invariant, including under
+// concurrent requests, and that only the claimer can release a claim.
 const baseUrl = inject("baseUrl");
 
 it("lists the seeded desks", async () => {
@@ -93,4 +95,78 @@ it("records a crowdsourced report without overwriting claim status", async () =>
   // reported it taken — the mismatch is the signal, not something to hide.
   expect(desk.status).toBe("available");
   expect(desk.report.status).toBe("taken");
+});
+
+const claimDesk = (deskId: string, name: string) =>
+  fetch(new URL(`/api/desks/${deskId}/claim`, baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+
+const release = (claimId: number, token?: string) =>
+  fetch(new URL(`/api/claims/${claimId}/release`, baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(token === undefined ? {} : { token }),
+  });
+
+it("lets exactly one of two overlapping claims on a free desk through", async () => {
+  const deskId = "2.28-1";
+
+  // The showcase case: two people tap the same desk at once, over a network
+  // where a request's body can arrive after its headers. Open both requests,
+  // send headers only, then both bodies, so each is in flight while the other
+  // is being handled. A server that checks "is it free?" before awaiting the
+  // body lets both through.
+  const open = (name: string) => {
+    const body = JSON.stringify({ name });
+    const req = request(new URL(`/api/desks/${deskId}/claim`, baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+    });
+    const status = new Promise<number>((resolve, reject) => {
+      req.on("response", (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on("error", reject);
+    });
+    req.flushHeaders();
+    return { send: () => req.end(body), status };
+  };
+
+  const a = open("racer-a");
+  const b = open("racer-b");
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  a.send();
+  b.send();
+  const statuses = (await Promise.all([a.status, b.status])).sort();
+  expect(statuses).toEqual([201, 409]);
+});
+
+it("only lets the claimer release their own claim", async () => {
+  const deskId = "2.27-1";
+
+  const res = await claimDesk(deskId, "erin");
+  expect(res.status).toBe(201);
+  const claim = await res.json();
+  expect(typeof claim.releaseToken).toBe("string");
+
+  // The token is a secret for the claimer: it must not leak to other sessions.
+  const listing = await (await fetch(new URL("/api/desks", baseUrl))).text();
+  expect(listing).not.toContain(claim.releaseToken);
+
+  expect((await release(claim.id)).status).toBe(403);
+  expect((await release(claim.id, "not-the-token")).status).toBe(403);
+
+  let desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
+  expect(desks.find((d: { id: string }) => d.id === deskId).status).toBe("pending");
+
+  expect((await release(claim.id, claim.releaseToken)).status).toBe(200);
+  desks = await (await fetch(new URL("/api/desks", baseUrl))).json();
+  expect(desks.find((d: { id: string }) => d.id === deskId).status).toBe("available");
+
+  // Releasing an already-released claim is refused, not silently accepted.
+  expect((await release(claim.id, claim.releaseToken)).status).toBe(409);
 });

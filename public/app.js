@@ -66,6 +66,15 @@ const levelPill = document.getElementById("level-pill");
 const seatEls = new Map();
 const areaFree = [];
 const qrByClaim = new Map();
+
+// Release tokens for claims made from this browser (or checked in from it via
+// the QR link). Only the holder can release a claim, so only they see the button.
+function releaseToken(claimId) {
+  try { return localStorage.getItem(`releaseToken:${claimId}`); } catch { return null; }
+}
+function saveReleaseToken(claimId, token) {
+  try { localStorage.setItem(`releaseToken:${claimId}`, token); } catch {}
+}
 let desks = [];
 let desksById = new Map();
 let selectedId = null;
@@ -269,7 +278,8 @@ function renderSheet(force = false) {
     return;
   }
   const qr = desk.claim ? qrByClaim.get(desk.claim.id) : null;
-  const sig = JSON.stringify([desk, Boolean(qr), sheetMsg]);
+  const mine = desk.claim ? Boolean(releaseToken(desk.claim.id)) : false;
+  const sig = JSON.stringify([desk, Boolean(qr), mine, sheetMsg]);
   if (!force && sig === lastSheetSig) return;
   lastSheetSig = sig;
 
@@ -293,7 +303,7 @@ function renderSheet(force = false) {
   } else {
     main = `
       <p><strong>${escapeHtml(desk.claim.name)}</strong> is here. Held until ${clock(desk.claim.expiresAt)}.</p>
-      <div class="actions"><button class="btn btn--ghost" data-action="release">I'm leaving</button></div>`;
+      ${mine ? `<div class="actions"><button class="btn btn--ghost" data-action="release">I'm leaving</button></div>` : ""}`;
   }
 
   const report = desk.report
@@ -369,11 +379,14 @@ async function act(action) {
     const name = document.getElementById("claim-name")?.value ?? "";
     localStorage.setItem("deskName", name);
     result = await postJson(`${deskPath}/claim`, { name });
-    if (result.ok) qrByClaim.set(result.data.id, result.data.qr);
+    if (result.ok) {
+      qrByClaim.set(result.data.id, result.data.qr);
+      saveReleaseToken(result.data.id, result.data.releaseToken);
+    }
   } else if (action === "checkin" && desk.claim) {
     result = await postJson(`/api/claims/${desk.claim.id}/checkin`);
   } else if (action === "release" && desk.claim) {
-    result = await postJson(`/api/claims/${desk.claim.id}/release`);
+    result = await postJson(`/api/claims/${desk.claim.id}/release`, { token: releaseToken(desk.claim.id) });
   } else if (action === "report-free" || action === "report-taken") {
     result = await postJson(`${deskPath}/report`, { status: action === "report-free" ? "free" : "taken" });
   }
