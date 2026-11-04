@@ -1,6 +1,9 @@
 import { expect, inject, it } from "vitest";
 import { CHECKIN_GRACE_MS } from "../src/logic.ts";
-import { freeDesk } from "./helpers.ts";
+import { freeDesk, post, testUser } from "./helpers.ts";
+
+const claimDeskUntracked = async (deskId: string) =>
+  post(`/api/desks/${deskId}/claim`, {}, (await testUser()).cookie);
 
 // The one genuinely wall-clock test: an unconfirmed claim really does release
 // itself, over the real HTTP API, within CHECKIN_GRACE_MS. Everything else
@@ -15,11 +18,8 @@ it(
     // Not released afterwards: expiring on its own is what's under test.
     const deskId = await freeDesk("quiet-computer");
 
-    const claimRes = await fetch(new URL(`/api/desks/${deskId}/claim`, baseUrl), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "dana" }),
-    });
+    // Not via `track`: the claim must be left to expire on its own.
+    const claimRes = await claimDeskUntracked(deskId);
     expect(claimRes.status).toBe(201);
 
     const desksNow = await (await fetch(new URL("/api/desks", baseUrl))).json();

@@ -1,4 +1,4 @@
-import { afterEach, inject } from "vitest";
+import { afterAll, afterEach, inject } from "vitest";
 
 // The spec runs against a fresh /data in CI but also against the deployed
 // app, whose database persists between runs and holds real people's claims.
@@ -10,12 +10,40 @@ const baseUrl = inject("baseUrl");
 
 export const url = (path: string): URL => new URL(path, baseUrl);
 
-export const post = (path: string, body: unknown = {}): Promise<Response> =>
+export const post = (path: string, body: unknown = {}, cookie?: string): Promise<Response> =>
   fetch(url(path), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
     body: JSON.stringify(body),
   });
+
+// Claiming needs an account. Test accounts use a recognisable "t-" handle
+// prefix and an obviously fake student ID; tests delete the accounts they
+// make (see `signUp`), so none linger in the deployed app's users table.
+let seq = 0;
+const madeUsers: string[] = [];
+
+export interface TestUser {
+  handle: string;
+  cookie: string;
+  fullName: string;
+  studentId: string;
+}
+
+export async function signUp(label = "user"): Promise<TestUser> {
+  const handle = `t-${label}-${Date.now().toString(36)}${(seq++).toString(36)}`.slice(0, 24);
+  const fullName = `Test ${label}`;
+  const studentId = "u0000000";
+  const res = await post("/api/signup", { handle, fullName, studentId, passphrase: "correct horse battery", consent: true });
+  if (res.status !== 201) throw new Error(`signup failed: ${res.status} ${await res.text()}`);
+  const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0]!;
+  madeUsers.push(cookie);
+  return { handle, cookie, fullName, studentId };
+}
+
+// The default account claims are made as, created on first use.
+let defaultUser: Promise<TestUser> | null = null;
+export const testUser = (): Promise<TestUser> => (defaultUser ??= signUp("spec"));
 
 export interface DeskView {
   id: string;
@@ -54,8 +82,10 @@ export function track(claim: { id: number; claimToken: string }): void {
   made.push({ id: claim.id, token: claim.claimToken });
 }
 
-export async function claimDesk(deskId: string, name: string): Promise<Response> {
-  const res = await post(`/api/desks/${deskId}/claim`, { name });
+// `as` picks the account (default: one shared test account per file).
+export async function claimDesk(deskId: string, as?: TestUser): Promise<Response> {
+  const user = as ?? (await testUser());
+  const res = await post(`/api/desks/${deskId}/claim`, {}, user.cookie);
   if (res.status === 201) track(await res.clone().json());
   return res;
 }
@@ -63,4 +93,10 @@ export async function claimDesk(deskId: string, name: string): Promise<Response>
 afterEach(async () => {
   // Releasing an already-released or expired claim is a harmless 409.
   await Promise.all(made.splice(0).map((c) => post(`/api/claims/${c.id}/release`, { token: c.token })));
+});
+
+afterAll(async () => {
+  await Promise.all(
+    madeUsers.splice(0).map((cookie) => fetch(url("/api/me"), { method: "DELETE", headers: { cookie } })),
+  );
 });

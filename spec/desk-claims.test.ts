@@ -1,7 +1,7 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { expect, it } from "vitest";
-import { claimDesk, freeDesk, getDesk, getDesks, post, track, url } from "./helpers.ts";
+import { claimDesk, freeDesk, getDesk, getDesks, post, signUp, testUser, track, url } from "./helpers.ts";
 
 // HTTP-level checks against the running app (spec/global-setup.ts finds it).
 // Exercises the "no two live claims on one desk" invariant, including under
@@ -24,26 +24,27 @@ it("lists the seeded desks", async () => {
 it("lets one claim through and refuses an overlapping one", async () => {
   const deskId = await freeDesk(ZONE);
 
-  const first = await claimDesk(deskId, "alice");
+  const first = await claimDesk(deskId);
   expect(first.status).toBe(201);
   const claim = await first.json();
   expect(claim.deskId).toBe(deskId);
 
-  expect((await claimDesk(deskId, "bob")).status).toBe(409);
+  const bob = await signUp("bob");
+  expect((await claimDesk(deskId, bob)).status).toBe(409);
 
   expect((await post(`/api/claims/${claim.id}/checkin`, { token: claim.claimToken })).status).toBe(200);
 
-  expect((await claimDesk(deskId, "carol")).status).toBe(409);
+  expect((await claimDesk(deskId, bob)).status).toBe(409);
 
   const desk = await getDesk(deskId);
   expect(desk.status).toBe("occupied");
-  expect(desk.claim?.name).toBe("alice");
+  expect(desk.claim?.name).toBe((await testUser()).handle);
 });
 
 it("serves the QR check-in link as a page, without checking in on a bare GET", async () => {
   const deskId = await freeDesk(ZONE);
 
-  const res = await claimDesk(deskId, "dana");
+  const res = await claimDesk(deskId);
   expect(res.status).toBe(201);
   const claim = await res.json();
 
@@ -76,14 +77,14 @@ it("lets exactly one of two overlapping claims on a free desk through", async ()
   // send headers only, then both bodies, so each is in flight while the other
   // is being handled. A server that checks "is it free?" before awaiting the
   // body lets both through.
-  const open = (name: string) => {
-    const body = JSON.stringify({ name });
+  const open = (cookie: string) => {
+    const body = JSON.stringify({});
     // node:http can't speak https, and APP_URL may be the deployed app.
     const target = url(`/api/desks/${deskId}/claim`);
     const request = target.protocol === "https:" ? httpsRequest : httpRequest;
     const req = request(target, {
       method: "POST",
-      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), cookie },
     });
     const result = new Promise<{ status: number; body: string }>((resolve, reject) => {
       req.on("response", (res) => {
@@ -98,8 +99,9 @@ it("lets exactly one of two overlapping claims on a free desk through", async ()
     return { send: () => req.end(body), result };
   };
 
-  const a = open("racer-a");
-  const b = open("racer-b");
+  const [racerA, racerB] = await Promise.all([signUp("racer-a"), signUp("racer-b")]);
+  const a = open(racerA.cookie);
+  const b = open(racerB.cookie);
   await new Promise((resolve) => setTimeout(resolve, 200));
   a.send();
   b.send();
@@ -110,7 +112,7 @@ it("lets exactly one of two overlapping claims on a free desk through", async ()
 
 it("only lets the claimer check in to their own claim", async () => {
   const deskId = await freeDesk(ZONE);
-  const claim = await (await claimDesk(deskId, "jo")).json();
+  const claim = await (await claimDesk(deskId)).json();
   const checkin = (body: unknown) => post(`/api/claims/${claim.id}/checkin`, body);
 
   expect((await checkin({})).status).toBe(403);
@@ -125,7 +127,7 @@ it("only lets the claimer release their own claim", async () => {
   const deskId = await freeDesk(ZONE);
   const release = (body: unknown) => post(`/api/claims/${claim.id}/release`, body);
 
-  const res = await claimDesk(deskId, "erin");
+  const res = await claimDesk(deskId);
   expect(res.status).toBe(201);
   const claim = await res.json();
   expect(typeof claim.claimToken).toBe("string");

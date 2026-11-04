@@ -27,6 +27,8 @@ export interface Claim {
   checkedInAt: number | null;
   expiresAt: number;
   status: ClaimStatus;
+  // The account that made it; null for claims from before accounts existed.
+  userId: number | null;
 }
 
 export type ReportStatus = "free" | "taken";

@@ -25,6 +25,7 @@ function claim(overrides: Partial<Claim>): Claim {
     checkedInAt: null,
     expiresAt: CHECKIN_GRACE_MS,
     status: "pending",
+    userId: null,
     ...overrides,
   };
 }

@@ -621,6 +621,186 @@ body {
   stroke-width: 2;
 }
 
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-btn {
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  max-width: 40vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.account-dialog {
+  width: min(460px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  border: 0;
+  border-radius: 14px;
+  padding: 8px 22px 22px;
+  color: var(--ink);
+  box-shadow: 0 10px 40px rgba(20, 50, 70, 0.3);
+}
+
+.account-dialog::backdrop {
+  background: rgba(20, 40, 55, 0.45);
+}
+
+.dialog-close-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dialog-close-row .sheet-close {
+  display: block;
+}
+
+.account-dialog h2 {
+  font-weight: 400;
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+
+.account-dialog h3 {
+  font-weight: 400;
+  font-size: 16px;
+  margin: 18px 0 6px;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+
+.tabs button {
+  font: inherit;
+  font-weight: 700;
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 8px 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tabs button[aria-selected="true"] {
+  color: var(--navy);
+  border-bottom-color: var(--navy);
+}
+
+.privacy {
+  margin-top: 16px;
+  font-size: 14px;
+  background: #eef4f8;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.privacy summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.privacy ul {
+  margin: 8px 0 2px;
+  padding-left: 18px;
+  line-height: 1.45;
+}
+
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.check input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.me {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 8px 0 0;
+  font-size: 14.5px;
+}
+
+.me dt {
+  color: var(--muted);
+}
+
+.me dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.me-history {
+  max-height: 220px;
+}
+
+.me-history li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 13.5px;
+}
+
+.me-history time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.actions--split {
+  justify-content: space-between;
+}
+
+.btn--danger {
+  background: #fff;
+  color: #c62020;
+  border: 1.5px solid #e88;
+  font-size: 15px;
+  padding: 8px 16px;
+}
+
+.btn--danger:hover {
+  background: #fdeeee;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .readme {
   max-width: 70ch;
   margin: 2rem auto;

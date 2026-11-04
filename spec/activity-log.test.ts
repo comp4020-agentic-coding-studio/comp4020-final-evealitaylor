@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { claimDesk, freeDesk, getDesk, post, url } from "./helpers.ts";
+import { claimDesk, freeDesk, getDesk, post, signUp, testUser, url } from "./helpers.ts";
 
 // The activity log is what persists after every claim has expired: who did
 // what to which desk, and when. Checked over HTTP against the running app.
@@ -24,7 +24,8 @@ it("records who claimed, checked in, released and reported a desk, with timestam
   const deskId = await freeDesk(ZONE);
   const before = Date.now();
 
-  const claim = await (await claimDesk(deskId, "frankie")).json();
+  const frankie = await testUser();
+  const claim = await (await claimDesk(deskId)).json();
   expect((await post(`/api/claims/${claim.id}/checkin`, { token: claim.claimToken })).status).toBe(200);
   expect((await post(`/api/desks/${deskId}/report`, { status: "free" })).status).toBe(201);
   expect((await post(`/api/claims/${claim.id}/release`, { token: claim.claimToken })).status).toBe(200);
@@ -32,7 +33,7 @@ it("records who claimed, checked in, released and reported a desk, with timestam
   const log = await activity();
   const ours = log.filter((e) => e.claimId === claim.id).reverse();
   expect(ours.map((e) => e.kind)).toEqual(["claim", "checkin", "release"]);
-  expect(ours.every((e) => e.actor === "frankie" && e.deskId === deskId)).toBe(true);
+  expect(ours.every((e) => e.actor === frankie.handle && e.deskId === deskId)).toBe(true);
 
   // Reports aren't tied to a claim, so find this one by desk and time.
   const report = log.find((e) => e.kind === "report" && e.deskId === deskId && e.at >= before);
@@ -53,18 +54,19 @@ it("records who claimed, checked in, released and reported a desk, with timestam
 it("logs refused actions as nothing: a 409 or 403 leaves no event", async () => {
   const deskId = await freeDesk(ZONE);
   const before = Date.now();
-  const claim = await (await claimDesk(deskId, "gale")).json();
-  expect((await claimDesk(deskId, "hal")).status).toBe(409);
+  const claim = await (await claimDesk(deskId)).json();
+  const hal = await signUp("hal");
+  expect((await claimDesk(deskId, hal)).status).toBe(409);
   expect((await post(`/api/claims/${claim.id}/release`, { token: "wrong" })).status).toBe(403);
   expect((await post(`/api/claims/${claim.id}/checkin`, { token: "wrong" })).status).toBe(403);
 
   const log = await activity();
   expect(log.filter((e) => e.claimId === claim.id).map((e) => e.kind)).toEqual(["claim"]);
-  expect(log.some((e) => e.actor === "hal" && e.at >= before)).toBe(false);
+  expect(log.some((e) => e.actor === hal.handle && e.at >= before)).toBe(false);
 });
 
 it("never exposes claim tokens in the log", async () => {
-  const claim = await (await claimDesk(await freeDesk(ZONE), "ira")).json();
+  const claim = await (await claimDesk(await freeDesk(ZONE))).json();
   const raw = await (await fetch(url("/api/activity"))).text();
   expect(raw).not.toContain(claim.claimToken);
 });

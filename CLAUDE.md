@@ -38,13 +38,15 @@ quietly "fix" the count without a crowdsourced-report-driven reason.
   through it rather than around it. (Correction: the first version checked
   then awaited the body, and two overlapping requests both got 201.)
 - **Only the claimer can check in to or release a claim; this is enforced on
-  the server, not by hiding buttons.** Each claim gets a random claim token
+  the server, not by hiding buttons.** Proof is either the claimer's
+  signed-in session (the account that made the claim) or the claim token.
+  Each claim gets a random claim token
   returned once, in the 201 to the claimer, and in the QR check-in link's
   `#fragment` (which browsers never send to the server). Check-in and release
   both require it (403 otherwise) and refuse a claim that's no longer live
   (409). The token must never appear in `/api/desks`, `/api/activity`, the
-  SSE stream, or logs. This is not an account: it proves "I made this claim",
-  nothing about who the person is. Anyone may report (free/taken) on any
+  SSE stream, or logs. The token is what lets a phone that scanned the QR
+  act on the claim without signing in there too. Anyone may report (free/taken) on any
   desk, by design: reports are observations, not ownership. (Correction: the
   release fix first left check-in open; the two-profile browser check showed
   a second person a working "Check in" button on someone else's claim.)
@@ -111,9 +113,40 @@ side. The UI must surface both signals, not just one.
 - All persistent state lives in the single SQLite file on the `/data`
   volume (`src/db.ts`). No second datastore, no separate DB server — the
   infra is fixed to one `shared-cpu-1x` machine and one volume.
-- No accounts: identity is a self-chosen name/pseudonym only, not persisted
-  server-side as a profile. Don't add login/auth without that being a
-  discussed scope change.
+
+## Accounts: anonymous to others, accountable to the system
+
+Accounts were added as a discussed scope change (Nov 2026; previously "no
+accounts, pseudonym only"): the audience is ANU students, and the owner
+wanted claims tied to a person for record keeping. The rules:
+
+- **Claiming needs an account; reporting never does.** A claim's public name
+  is the account's handle. "Looks free/taken" reports need no sign-in and
+  are always shown publicly as "Anonymous", even when the reporter is signed
+  in (the link is kept privately for their own history). Never put sign-in
+  in front of reporting: frictionless honest reports are the product's core.
+- **Private fields stay private.** Full name and student ID are stored for
+  record keeping and returned only to their owner by `GET /api/me`. They must
+  never appear in `/api/desks`, `/api/activity`, the SSE stream, stdout logs,
+  error messages, or any other user's response. Covered by
+  `spec/accounts.test.ts`; never weaken it.
+- **Student IDs are format-checked (`u` + 7 digits), not verified,** and
+  deliberately not unique: uniqueness on an unverifiable field would let
+  anyone lock a real student out by registering their number first. Never
+  present the stored ID as verified.
+- **Consent and erasure.** Signup requires explicit consent to the privacy
+  notice (`consent: true`). `DELETE /api/me` erases the account (name,
+  student ID, passphrase hash, sessions), releases its live claims, and
+  replaces the name on its claims. Activity rows are not touched: they store
+  a `user_id` and the public log joins to the current handle, so a deleted
+  account shows as "deleted user" without breaking the append-only rule.
+- **Credentials.** Passphrases: scrypt, per-user salt. Sessions: random
+  token in an `HttpOnly; SameSite=Lax` cookie (`Secure` behind https);
+  only its SHA-256 is stored. State-changing requests with a cross-site
+  `Origin` are refused. No other auth scheme without discussion; never log
+  a passphrase, session token or claim token.
+- **No ANU single sign-on.** It isn't available to a course app; this is
+  why IDs can't be verified. Don't fake it.
 
 ## Spec tests
 

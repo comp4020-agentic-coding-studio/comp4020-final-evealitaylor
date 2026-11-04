@@ -84,6 +84,10 @@ let lastSheetSig = null;
 let sheetMsg = "";
 let built = false;
 let activity = [];
+// The signed-in account (handle only on the page; private fields are fetched
+// only into the account dialog), and the live claims it owns.
+let me = null;
+let myClaims = new Set();
 // True while a POST is in flight: buttons are disabled so a slow connection
 // can't turn one tap into two requests.
 let busy = false;
@@ -284,22 +288,22 @@ function renderSheet(force = false) {
     return;
   }
   const qr = desk.claim ? qrByClaim.get(desk.claim.id) : null;
-  const mine = desk.claim ? Boolean(claimToken(desk.claim.id)) : false;
-  const sig = JSON.stringify([desk, Boolean(qr), mine, sheetMsg, busy]);
+  const mine = desk.claim ? Boolean(claimToken(desk.claim.id)) || myClaims.has(desk.claim.id) : false;
+  const sig = JSON.stringify([desk, Boolean(qr), mine, sheetMsg, busy, me?.handle]);
   if (!force && sig === lastSheetSig) return;
   lastSheetSig = sig;
-
-  const active = document.activeElement;
-  const restoreName = active && active.id === "claim-name" ? active.selectionStart : null;
 
   const mismatch = isMismatch(desk);
   let main = "";
   if (desk.status === "available") {
-    main = `
-      <label class="field" for="claim-name">Your name or pseudonym</label>
-      <input id="claim-name" class="input" type="text" maxlength="40" placeholder="e.g. Sam" value="${escapeHtml(localStorage.getItem("deskName") ?? "")}" />
+    main = me
+      ? `
+      <p class="sub">You'll appear to others as <strong>${escapeHtml(me.handle)}</strong>.</p>
       <div class="actions"><button class="btn" data-action="claim">Claim</button></div>
-      <p class="hint">Only claim a desk you're sitting at. You'll have 20 seconds to check in or it's released.</p>`;
+      <p class="hint">Only claim a desk you're sitting at. You'll have 20 seconds to check in or it's released.</p>`
+      : `
+      <p class="sub">Sign in to claim this desk. You can still report what you see below without an account.</p>
+      <div class="actions"><button class="btn" data-action="signin">Sign in to claim</button></div>`;
   } else if (desk.status === "pending") {
     main = `
       <p>Claimed by <strong>${escapeHtml(desk.claim.name)}</strong>. Check in within
@@ -346,15 +350,6 @@ function renderSheet(force = false) {
       btn.disabled = true;
     }
   }
-
-  const nameInput = document.getElementById("claim-name");
-  if (nameInput) {
-    nameInput.addEventListener("input", () => localStorage.setItem("deskName", nameInput.value));
-    if (restoreName !== null) {
-      nameInput.focus();
-      nameInput.setSelectionRange(restoreName, restoreName);
-    }
-  }
 }
 
 function select(id) {
@@ -386,9 +381,9 @@ async function postJson(path, body) {
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, data };
+    return { ok: res.ok, status: res.status, data };
   } catch {
-    return { ok: false, data: { error: "Couldn't reach the server. Check your connection and try again." } };
+    return { ok: false, status: 0, data: { error: "Couldn't reach the server. Check your connection and try again." } };
   } finally {
     clearTimeout(timer);
   }
@@ -402,13 +397,21 @@ async function act(action) {
   renderSheet(true);
   const deskPath = `/api/desks/${encodeURIComponent(desk.id)}`;
   let result = { ok: true, data: {} };
+  if (action === "signin") {
+    busy = false;
+    renderSheet(true);
+    openAccount("signin");
+    return;
+  }
   if (action === "claim") {
-    const name = document.getElementById("claim-name")?.value ?? "";
-    localStorage.setItem("deskName", name);
-    result = await postJson(`${deskPath}/claim`, { name });
+    result = await postJson(`${deskPath}/claim`, {});
     if (result.ok) {
       qrByClaim.set(result.data.id, result.data.qr);
       saveClaimToken(result.data.id, result.data.claimToken);
+      myClaims.add(result.data.id);
+    } else if (result.status === 401) {
+      // Session expired since the page loaded.
+      setMe(null);
     }
   } else if (action === "checkin" && desk.claim) {
     result = await postJson(`/api/claims/${desk.claim.id}/checkin`, { token: claimToken(desk.claim.id) });
@@ -539,5 +542,178 @@ window.addEventListener("online", () => {
   if (!source) connectEvents();
 });
 
+// ---- Accounts ----
+const accountBtn = document.getElementById("account-btn");
+const accountDialog = document.getElementById("account-dialog");
+const accountBody = document.getElementById("account-body");
+
+function setMe(next, liveClaimIds = []) {
+  me = next;
+  myClaims = new Set(liveClaimIds);
+  accountBtn.textContent = me ? me.handle : "Sign in";
+  accountBtn.setAttribute("aria-label", me ? `Your account (${me.handle})` : "Sign in or create an account");
+  renderSheet(true);
+}
+
+async function loadMe() {
+  try {
+    const res = await fetch("/api/me");
+    if (!res.ok) return setMe(null);
+    const data = await res.json();
+    setMe(data.user, data.liveClaimIds);
+    return data.user ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+const PRIVACY = `
+  <details class="privacy">
+    <summary>What's collected and who sees it</summary>
+    <ul>
+      <li><strong>Everyone</strong> sees only your handle, on desks you claim and in the activity log. Reports always show as "Anonymous".</li>
+      <li><strong>Only you</strong> can see your full name and student ID (under your account). They're stored on this app's server for record keeping and are never shown to other users, written to logs, or sent to anyone else.</li>
+      <li>Your student ID isn't verified against ANU's systems.</li>
+      <li>Your passphrase is stored only as a salted hash.</li>
+      <li>You can delete your account at any time. That erases your name, student ID and passphrase; your past actions stay in the log as "deleted user".</li>
+      <li>This is a student project (COMP4020/8020), not an official ANU service.</li>
+    </ul>
+  </details>`;
+
+function renderAccount(mode, msg = "", data = null) {
+  if (mode === "me" && data) {
+    const u = data.user;
+    const hist = data.history.length
+      ? data.history
+          .map((e) => {
+            const desk = desksById.get(e.deskId);
+            const where = desk ? `${desk.label}, ${desk.zone}` : e.deskId;
+            const what = e.kind === "report" ? `reported ${e.detail}` : { claim: "claimed", checkin: "checked in", release: "released", expire: e.detail === "hold-ended" ? "hold ended" : "didn't check in" }[e.kind];
+            return `<li><time>${when(e.at)}</time> <span>${escapeHtml(what ?? e.kind)}: ${escapeHtml(where)}</span></li>`;
+          })
+          .join("")
+      : `<li class="placeholder">Nothing yet.</li>`;
+    accountBody.innerHTML = `
+      <h2 id="account-title">Your account</h2>
+      <dl class="me">
+        <dt>Handle (public)</dt><dd>${escapeHtml(u.handle)}</dd>
+        <dt>Full name (private)</dt><dd>${escapeHtml(u.fullName)}</dd>
+        <dt>Student ID (private)</dt><dd>${escapeHtml(u.studentId)}</dd>
+        <dt>Member since</dt><dd>${new Date(u.createdAt).toLocaleDateString()}</dd>
+      </dl>
+      <h3>Your history</h3>
+      <ol class="activity-list me-history">${hist}</ol>
+      ${msg ? `<p class="msg" role="alert">${escapeHtml(msg)}</p>` : ""}
+      <div class="actions actions--split">
+        <button class="btn btn--danger" data-acct="delete">Delete my account</button>
+        <button class="btn btn--ghost" data-acct="logout">Sign out</button>
+      </div>`;
+    return;
+  }
+  const signin = mode === "signin";
+  accountBody.innerHTML = `
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="${signin}" data-acct="tab-signin">Sign in</button>
+      <button role="tab" aria-selected="${!signin}" data-acct="tab-signup">Create account</button>
+    </div>
+    <h2 id="account-title" class="visually-hidden">${signin ? "Sign in" : "Create account"}</h2>
+    <form id="account-form" novalidate>
+      <label class="field" for="f-handle">Handle${signin ? "" : " (shown to others)"}</label>
+      <input id="f-handle" name="handle" class="input" autocomplete="username" required maxlength="24" />
+      ${
+        signin
+          ? ""
+          : `
+      <label class="field" for="f-name">Full name (private)</label>
+      <input id="f-name" name="fullName" class="input" autocomplete="name" required maxlength="80" />
+      <label class="field" for="f-sid">Student ID (private)</label>
+      <input id="f-sid" name="studentId" class="input" placeholder="u1234567" required maxlength="8" autocapitalize="none" />`
+      }
+      <label class="field" for="f-pass">Passphrase${signin ? "" : " (10+ characters)"}</label>
+      <input id="f-pass" name="passphrase" type="password" class="input" autocomplete="${signin ? "current-password" : "new-password"}" required />
+      ${
+        signin
+          ? ""
+          : `${PRIVACY}
+      <label class="check"><input type="checkbox" name="consent" required /> I've read the above and agree to my name and student ID being stored for record keeping.</label>`
+      }
+      ${msg ? `<p class="msg" role="alert">${escapeHtml(msg)}</p>` : ""}
+      <div class="actions"><button class="btn" type="submit">${signin ? "Sign in" : "Create account"}</button></div>
+    </form>`;
+  accountBody.querySelector("#f-handle")?.focus();
+}
+
+let accountMode = "signin";
+async function openAccount(mode) {
+  accountMode = me ? "me" : mode;
+  if (accountMode === "me") {
+    const data = await loadMe();
+    if (!data) accountMode = "signin";
+    else renderAccount("me", "", data);
+  }
+  if (accountMode !== "me") renderAccount(accountMode);
+  if (!accountDialog.open) accountDialog.showModal();
+}
+
+accountBtn.addEventListener("click", () => openAccount("signin"));
+
+accountBody.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-acct]");
+  if (!btn) return;
+  const what = btn.dataset.acct;
+  if (what === "tab-signin" || what === "tab-signup") {
+    accountMode = what === "tab-signin" ? "signin" : "signup";
+    renderAccount(accountMode);
+  } else if (what === "logout") {
+    await postJson("/api/logout");
+    setMe(null);
+    accountDialog.close();
+  } else if (what === "delete") {
+    if (!confirm("Delete your account? This erases your name, student ID and passphrase and can't be undone. Your past actions stay in the log as \"deleted user\".")) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/me", { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      setMe(null);
+      accountDialog.close();
+    } catch {
+      btn.disabled = false;
+      renderAccount("me", "Couldn't delete your account. Try again.", await loadMe());
+    }
+  }
+});
+
+accountBody.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const form = ev.target;
+  const f = new FormData(form);
+  const submit = form.querySelector("button[type=submit]");
+  submit.disabled = true;
+  const body =
+    accountMode === "signin"
+      ? { handle: f.get("handle"), passphrase: f.get("passphrase") }
+      : {
+          handle: f.get("handle"),
+          fullName: f.get("fullName"),
+          studentId: f.get("studentId"),
+          passphrase: f.get("passphrase"),
+          consent: f.get("consent") === "on",
+        };
+  const result = await postJson(accountMode === "signin" ? "/api/login" : "/api/signup", body);
+  if (!result.ok) {
+    const keep = Object.fromEntries([...f.entries()].filter(([k]) => k !== "passphrase"));
+    renderAccount(accountMode, result.data.error ?? "Something went wrong, try again.");
+    for (const [k, v] of Object.entries(keep)) {
+      const el = accountBody.querySelector(`[name="${k}"]`);
+      if (el && el.type !== "checkbox") el.value = v;
+      else if (el) el.checked = v === "on";
+    }
+    return;
+  }
+  await loadMe();
+  accountDialog.close();
+});
+
+loadMe();
 renderSheet();
 connectEvents();

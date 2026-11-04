@@ -73,16 +73,37 @@ while (tabs < 120 && !deskId) {
 if (!deskId) throw new Error("no free desk reachable by keyboard");
 log(`keyboard reached free desk ${deskId} after ${tabs} tabs`);
 await A.keyboard.press("Enter");
-await A.waitForSelector("#claim-name");
-await A.focus("#claim-name");
-await A.keyboard.type("Desktop Dee");
-await A.keyboard.press("Tab");
-await A.keyboard.press("Enter"); // Claim button
+// Not signed in: the sheet offers "Sign in to claim" instead of Claim.
+await A.waitForSelector('[data-action="signin"]');
+log("signed out: sheet asks to sign in before claiming");
+// Create an account through the real form, by keyboard.
+const HANDLE = `t-browser-${Date.now().toString(36)}`;
+await A.focus('[data-action="signin"]');
+await A.keyboard.press("Enter");
+await A.waitForSelector("#account-dialog[open]");
+await A.click('[data-acct="tab-signup"]');
+await A.fill("#f-handle", HANDLE);
+await A.fill("#f-name", "Browser Check");
+await A.fill("#f-sid", "u0000000");
+await A.fill("#f-pass", "correct horse battery");
+await A.check('input[name="consent"]');
+const dialogOverflow = await A.evaluate(() => { const r = document.querySelector("#account-dialog").getBoundingClientRect(); return r.right <= innerWidth && r.left >= 0; });
+log(`signup dialog fits the viewport: ${dialogOverflow}`);
+await A.screenshot({ path: `${SHOTS}/desktop-1b-signup.png` });
+await A.click('#account-form button[type="submit"]');
+await A.waitForFunction((h) => document.querySelector("#account-btn")?.textContent === h, HANDLE, { timeout: 5000 });
+log("signed up via the form; header shows handle");
+// Back to the desk, claim by keyboard.
+await A.locator(`[data-id="${deskId}"]`).focus();
+await A.keyboard.press("Enter");
+await A.waitForSelector('[data-action="claim"]');
+await A.focus('[data-action="claim"]');
+await A.keyboard.press("Enter");
 await A.waitForSelector(".pill--yellow", { timeout: 3000 });
 const t0 = Date.now();
 await B.waitForFunction((id) => document.querySelector(`[data-id="${id}"]`)?.classList.contains("seat--pending"), deskId, { timeout: 3000 });
 log(`phone saw desktop's claim in ~${Date.now() - t0}ms`);
-await B.waitForFunction(() => document.querySelector("#activity-list")?.textContent.includes("Desktop Dee"), null, { timeout: 3000 });
+await B.waitForFunction((h) => document.querySelector("#activity-list")?.textContent.includes(h), HANDLE, { timeout: 3000 });
 log("phone activity log shows the claim");
 await A.screenshot({ path: `${SHOTS}/desktop-2-claimed.png` });
 
@@ -91,11 +112,12 @@ await A.keyboard.press("Escape");
 const back = await A.evaluate(() => document.activeElement?.getAttribute("data-id"));
 log(`after Escape focus is on desk: ${back === deskId ? "yes" : "NO (" + back + ")"}`);
 
-// Phone: tap the same desk, sees claimed by Desktop Dee, no release button
+// Phone (a separate profile, signed out): sees the claimer's handle only,
+// never their private details, and no Check in / QR for someone else's claim.
 await B.locator(`[data-id="${deskId}"]`).tap();
 await B.waitForSelector(".sheet.open");
-const phoneSees = await B.evaluate(() => ({ text: document.querySelector("#sheet-body").textContent.includes("Desktop Dee"), checkin: !!document.querySelector('[data-action="checkin"]'), qr: !!document.querySelector(".qr") }));
-log(`phone sheet shows claimer: ${phoneSees.text}; shows someone else's Check in button / QR (both should be false): ${phoneSees.checkin} / ${phoneSees.qr}`);
+const phoneSees = await B.evaluate((h) => ({ text: document.querySelector("#sheet-body").textContent.includes(h), leaks: /Browser Check|u0000000/.test(document.body.textContent), checkin: !!document.querySelector('[data-action="checkin"]'), qr: !!document.querySelector(".qr") }), HANDLE);
+log(`phone sheet shows claimer's handle: ${phoneSees.text}; phone page shows their name or ID (should be false): ${phoneSees.leaks}; shows someone else's Check in button / QR (both should be false): ${phoneSees.checkin} / ${phoneSees.qr}`);
 await B.waitForTimeout(400);
 const sheetBox = await B.evaluate(() => { const r = document.querySelector("#sheet").getBoundingClientRect(); return { top: r.top, bottom: r.bottom, h: innerHeight }; });
 log(`phone sheet box top=${Math.round(sheetBox.top)} bottom=${Math.round(sheetBox.bottom)} viewport=${sheetBox.h}`);
@@ -146,6 +168,18 @@ await B.waitForTimeout(300);
 log(`stale offline error cleared after reconnect: ${!(await B.$(".msg"))}`);
 const caughtUp = await B.waitForFunction((id) => document.querySelector(`[data-id="${id}"]`)?.classList.contains("seat--available"), deskId, { timeout: 5000 }).then(() => true).catch(() => false);
 log(`back online: live again, caught up on release made while offline: ${caughtUp}`);
+
+// Account view shows the private fields to their owner, then delete it so
+// a run against the deployed app leaves no test account behind.
+await A.click("#account-btn");
+await A.waitForSelector(".me");
+const ownView = await A.evaluate(() => document.querySelector(".me").textContent);
+log(`own account view shows name and ID: ${ownView.includes("Browser Check") && ownView.includes("u0000000")}`);
+await A.screenshot({ path: `${SHOTS}/desktop-6-account.png` });
+A.once("dialog", (d) => d.accept());
+await A.click('[data-acct="delete"]');
+await A.waitForFunction(() => document.querySelector("#account-btn")?.textContent === "Sign in", null, { timeout: 5000 });
+log("account deleted from the account view");
 
 await A.screenshot({ path: `${SHOTS}/desktop-5-final.png`, fullPage: true });
 await B.screenshot({ path: `${SHOTS}/phone-5-final.png`, fullPage: true });
