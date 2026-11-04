@@ -55,15 +55,23 @@ for (const [n, p] of [["desktop", A], ["phone", B]]) {
   await p.screenshot({ path: `${SHOTS}/${n}-1-initial.png`, fullPage: true });
 }
 
-// Desktop claims a desk via keyboard only
+// Desktop claims a desk via keyboard only. Against a deployed app some desks
+// may already be claimed by real people, so Tab on to the first free one.
 await A.keyboard.press("Tab"); // brand
-let tabs = 0;
-while (tabs < 10) {
+let tabs = 1;
+let firstDesk = null;
+let deskId = null;
+while (tabs < 120 && !deskId) {
   await A.keyboard.press("Tab"); tabs++;
-  const id = await A.evaluate(() => document.activeElement?.getAttribute("data-id"));
-  if (id) { log(`keyboard reached desk ${id} after ${tabs + 1} tabs`); break; }
+  const seat = await A.evaluate(() => {
+    const el = document.activeElement;
+    return el?.getAttribute("data-id") ? { id: el.getAttribute("data-id"), free: el.classList.contains("seat--available") } : null;
+  });
+  if (seat && !firstDesk) { firstDesk = seat.id; log(`keyboard reached first desk ${seat.id} after ${tabs} tabs`); }
+  if (seat?.free) deskId = seat.id;
 }
-const deskId = await A.evaluate(() => document.activeElement?.getAttribute("data-id"));
+if (!deskId) throw new Error("no free desk reachable by keyboard");
+log(`keyboard reached free desk ${deskId} after ${tabs} tabs`);
 await A.keyboard.press("Enter");
 await A.waitForSelector("#claim-name");
 await A.focus("#claim-name");

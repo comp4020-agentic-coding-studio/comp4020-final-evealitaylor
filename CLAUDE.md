@@ -124,6 +124,17 @@ side. The UI must surface both signals, not just one.
   `fetch`es) passed against the buggy code because each request's body
   arrived with its headers. Concurrency tests must hold the request bodies
   back (send headers, then bodies) to reproduce the real-network interleaving.
+- **Every spec test must pass against the deployed app, repeatedly,** not
+  just against CI's fresh `/data`. Production persists real claims and an
+  append-only log, so tests never hardcode a desk id (use `freeDesk()` from
+  `spec/helpers.ts`, with a zone prefix per file since files run in
+  parallel), only assert on log events they created (by claim id), release
+  every claim they make (`claimDesk`/`track` do this after each test), and
+  speak https as well as http. Verify with
+  `APP_URL=https://comp4020-final-evealitaylor.fly.dev pnpm test` run twice.
+  (Correction: the first live run passed, then a second failed, because it
+  found desks still held for 2h by the first run's checked-in claims; the
+  race test also crashed on https because `node:http` can't speak it.)
 - **Schema changes migrate in place.** The production SQLite file already
   holds data; `src/db.ts` must upgrade an existing database (add columns with
   `ALTER TABLE`, clean up rows that would violate a new constraint) on

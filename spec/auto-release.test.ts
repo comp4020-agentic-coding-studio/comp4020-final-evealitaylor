@@ -1,5 +1,6 @@
 import { expect, inject, it } from "vitest";
 import { CHECKIN_GRACE_MS } from "../src/logic.ts";
+import { freeDesk } from "./helpers.ts";
 
 // The one genuinely wall-clock test: an unconfirmed claim really does release
 // itself, over the real HTTP API, within CHECKIN_GRACE_MS. Everything else
@@ -11,7 +12,8 @@ const baseUrl = inject("baseUrl");
 it(
   "auto-releases an unconfirmed claim after the check-in grace period",
   async () => {
-    const deskId = "2.23-1";
+    // Not released afterwards: expiring on its own is what's under test.
+    const deskId = await freeDesk("quiet-computer");
 
     const claimRes = await fetch(new URL(`/api/desks/${deskId}/claim`, baseUrl), {
       method: "POST",
