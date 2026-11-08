@@ -129,7 +129,9 @@ side. The UI must surface both signals, not just one.
   or auth. Baseline (local, 200MB heap cap): p95 delivery ~330ms, peak RSS
   ~150MB. **Run it against the deployed app too:** Fly's shared CPU is
   several times slower than a laptop, and the first live run missed the 1s
-  target (p95 2.6s) while passing locally. QR codes are drawn in the
+  target (p95 2.6s) while passing locally. After moving QRs off the server:
+  three consecutive live runs at 60 viewers, max 708–818ms (≈150ms of it
+  network to Sydney). The first run after a deploy is slower (cold start). QR codes are drawn in the
   claimer's browser (`public/vendor/qrcode-generator.js`), never on the
   server: server-side QR generation was what queued up on Fly.
 - Nothing CPU-heavy runs synchronously on the request path: passphrase

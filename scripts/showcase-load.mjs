@@ -78,6 +78,10 @@ const users = await Promise.all(
     return { cookie: res.headers.get("set-cookie").split(";")[0] };
   }),
 );
+// People sign up over minutes at a real showcase, not in the same second
+// they claim; let the signup burst (scrypt is deliberately slow) settle so
+// the claim burst is measured on its own.
+await new Promise((r) => setTimeout(r, 3000));
 console.log(`${CLAIMERS} accounts created; ${CLAIMERS} people now claim ${targets.length} desks, two per desk, at once`);
 
 // Two claimers per desk, all fired together.
