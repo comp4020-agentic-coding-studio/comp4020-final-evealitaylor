@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { toDataURL } from "qrcode";
 import {
   getDesks,
   getLiveClaims,
@@ -263,7 +262,9 @@ async function serveStatic(res: ServerResponse, relativePath: string): Promise<v
 }
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  // Behind Fly's proxy the app sees plain http; links it hands out (the QR
+  // check-in URL) must use the scheme the visitor actually used.
+  const url = new URL(req.url ?? "/", `${isHttps(req) ? "https" : "http"}://${req.headers.host ?? "localhost"}`);
   const { pathname } = url;
   const method = req.method ?? "GET";
 
@@ -343,8 +344,10 @@ const server = createServer(async (req, res) => {
     const claim = insertClaimIfFree(deskId, user.id, name, token, now, now + CHECKIN_GRACE_MS);
     if (!claim) return sendJson(res, 409, { error: "desk is already claimed" });
     record({ at: now, kind: "claim", deskId, claimId: claim.id, actor: name, detail: null }, user.id);
+    // The claimer's browser draws the QR from this link; generating it here
+    // cost ~10ms of CPU per claim, which queued up on Fly's shared CPU when a
+    // room claimed at once (see CLAUDE.md, showcase load target).
     const checkinUrl = `${url.origin}/checkin/${claim.id}#${token}`;
-    const qr = await toDataURL(checkinUrl);
     broadcast();
     return sendJson(res, 201, {
       id: claim.id,
@@ -355,7 +358,6 @@ const server = createServer(async (req, res) => {
       // Required to check in or release.
       claimToken: token,
       checkinUrl,
-      qr,
     });
   }
 

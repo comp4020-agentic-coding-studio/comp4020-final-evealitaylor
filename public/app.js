@@ -70,7 +70,22 @@ const ghostDetail = document.getElementById("ghost-detail");
 
 const seatEls = new Map();
 const areaFree = [];
+// Check-in links for claims made here; the QR is drawn from them on the page.
 const qrByClaim = new Map();
+
+// Draws a QR for a check-in link with the vendored qrcode-generator (MIT,
+// public/vendor). Returns null if the library didn't load, in which case the
+// Check in button still works; only the phone shortcut is missing.
+function qrDataUrl(text) {
+  try {
+    const qr = window.qrcode(0, "M");
+    qr.addData(text);
+    qr.make();
+    return qr.createDataURL(5, 2);
+  } catch {
+    return null;
+  }
+}
 
 // Claim tokens for claims made from this browser (or opened on it via the QR
 // link). Only the holder can check in or release, so only they see those buttons.
@@ -409,7 +424,7 @@ async function act(action) {
   if (action === "claim") {
     result = await postJson(`${deskPath}/claim`, {});
     if (result.ok) {
-      qrByClaim.set(result.data.id, result.data.qr);
+      qrByClaim.set(result.data.id, qrDataUrl(result.data.checkinUrl));
       saveClaimToken(result.data.id, result.data.claimToken);
       myClaims.add(result.data.id);
     } else if (result.status === 401) {

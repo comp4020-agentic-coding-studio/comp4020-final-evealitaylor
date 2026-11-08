@@ -36,12 +36,15 @@ it("records who claimed, checked in, released and reported a desk, with timestam
   expect(ours.every((e) => e.actor === frankie.handle && e.deskId === deskId)).toBe(true);
 
   // Reports aren't tied to a claim, so find this one by desk and time.
-  const report = log.find((e) => e.kind === "report" && e.deskId === deskId && e.at >= before);
+  const report = log.find((e) => e.kind === "report" && e.deskId === deskId && e.at >= before - 5000);
   expect(report).toMatchObject({ actor: "Anonymous", detail: "free", claimId: null });
 
+  // Timestamps are the server's clock; against the deployed app it can
+  // differ from this machine's by some ms, so allow a few seconds of skew.
+  const SKEW = 5000;
   for (const e of [...ours, report!]) {
-    expect(e.at).toBeGreaterThanOrEqual(before);
-    expect(e.at).toBeLessThanOrEqual(Date.now());
+    expect(e.at).toBeGreaterThanOrEqual(before - SKEW);
+    expect(e.at).toBeLessThanOrEqual(Date.now() + SKEW);
   }
   // Ordered as they happened: report between check-in and release.
   expect(ours[1]!.id).toBeLessThan(report!.id);

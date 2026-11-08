@@ -127,7 +127,11 @@ side. The UI must surface both signals, not just one.
   deliveries, and every change at every viewer within 1s; it cleans up its
   accounts and claims. Run it after changes to the claim path, broadcasts
   or auth. Baseline (local, 200MB heap cap): p95 delivery ~330ms, peak RSS
-  ~150MB, claim responses ~215ms under the burst (QR generation dominates).
+  ~150MB. **Run it against the deployed app too:** Fly's shared CPU is
+  several times slower than a laptop, and the first live run missed the 1s
+  target (p95 2.6s) while passing locally. QR codes are drawn in the
+  claimer's browser (`public/vendor/qrcode-generator.js`), never on the
+  server: server-side QR generation was what queued up on Fly.
 - Nothing CPU-heavy runs synchronously on the request path: passphrase
   hashing uses async scrypt so one sign-in can't stall every live update.
 - Broadcasts are coalesced into one snapshot per 100ms (`BROADCAST_MS`), so

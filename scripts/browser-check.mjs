@@ -100,6 +100,11 @@ await A.waitForSelector('[data-action="claim"]');
 await A.focus('[data-action="claim"]');
 await A.keyboard.press("Enter");
 await A.waitForSelector(".pill--yellow", { timeout: 3000 });
+const qrOk = await A.evaluate(() => {
+  const img = document.querySelector(".qr img");
+  return Boolean(img && img.src.startsWith("data:image/") && img.naturalWidth > 0);
+});
+log(`claimer sees a drawn check-in QR: ${qrOk}`);
 const t0 = Date.now();
 await B.waitForFunction((id) => document.querySelector(`[data-id="${id}"]`)?.classList.contains("seat--pending"), deskId, { timeout: 3000 });
 log(`phone saw desktop's claim in ~${Date.now() - t0}ms`);

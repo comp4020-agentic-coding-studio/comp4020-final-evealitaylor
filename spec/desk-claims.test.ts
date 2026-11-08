@@ -57,6 +57,23 @@ it("serves the QR check-in link as a page, without checking in on a bare GET", a
   expect((await getDesk(deskId)).status).toBe("pending");
 });
 
+it("hands out an https check-in link when the visitor came over https", async () => {
+  const deskId = await freeDesk(ZONE);
+  const user = await testUser();
+  // Behind Fly's proxy the app sees http plus this header. An http:// link
+  // in the QR would be redirected, and some phones drop the #token on redirect.
+  const res = await fetch(url(`/api/desks/${deskId}/claim`), {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie: user.cookie, "x-forwarded-proto": "https" },
+    body: "{}",
+  });
+  expect(res.status).toBe(201);
+  const claim = await res.json();
+  track(claim);
+  expect(claim.checkinUrl).toMatch(/^https:\/\//);
+  expect(claim.checkinUrl).toContain(`#${claim.claimToken}`);
+});
+
 it("records a crowdsourced report without overwriting claim status", async () => {
   const deskId = await freeDesk(ZONE);
 
